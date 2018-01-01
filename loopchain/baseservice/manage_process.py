@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,21 +31,48 @@ class ManageProcess(CommonThread):
 
     def __init__(self):
         # logging.warning("ManageProcess Init")
-        manager = multiprocessing.Manager()
-        self.__manager_dic = manager.dict()
-        self.__manager_list = manager.list()
+        self.__manager = None
+        self.__manager_dic = None
+        self.__manager_list = None
         self.__run_process = None
+        self.__init_manager()
+
+    def __init_manager(self):
+        self.__manager = multiprocessing.Manager()
+        self.__manager_dic = self.__manager.dict()
+        self.__manager_list = self.__manager.list()
 
     def is_run(self):
-        return self.__run_process.is_alive()
+        try:
+            return (self.__run_process.is_alive() and
+                    self.__manager is not None and
+                    self.__manager._process is not None and
+                    self.__manager._process.is_alive())
+
+        except Exception as e:
+            logging.exception(f'{str(type(self))}.is_run except : {e}')
+            return False
 
     def run(self):
         # logging.debug("run by CommonTread.start")
+        if self.__manager is None:
+            self.__init_manager()
+
         self.__run_process = multiprocessing.Process(
             target=self.process_loop,
             args=(self.__manager_dic, self.__manager_list)
         )
         self.__run_process.start()
+        # call process join in advance, It prevent defunct process. <- we expect this but not sure yet
+        self.__run_process.join()
+
+    def _stop_manager(self):
+        self.__manager_list = None
+        self.__manager_dic = None
+
+        self.__manager.shutdown()
+        self.__manager.join()
+        self.__manager = None
 
     def stop(self):
         # logging.debug("try stop process...")
@@ -62,6 +89,9 @@ class ManageProcess(CommonThread):
 
     def send_to_process(self, job):
         try:
+            if self.__manager_list is None:
+                return False
+
             # logging.debug(f"add job to manage list job :{job}")
             self.__manager_list.append(job)
             # logging.debug(f'manage list append : {self.__manager_list}')
@@ -73,6 +103,9 @@ class ManageProcess(CommonThread):
                 return True
 
             logging.warning(f"Process is not available. job({job}) error({e})")
+            return False
+        except BrokenPipeError as e:
+            logging.error(f'Process is not available. BrokenPipeError job({job}) error({e})')
             return False
 
     def set_to_process(self, key, value):

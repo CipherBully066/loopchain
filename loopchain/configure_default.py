@@ -45,8 +45,8 @@ else:
 LOOPCHAIN_LOG_LEVEL = os.getenv('LOOPCHAIN_LOG_LEVEL', 'DEBUG')
 LOG_LEVEL = logging.getLevelName(LOOPCHAIN_LOG_LEVEL)
 LOG_FILE_PATH = "/var/tmp/loop_service.log"
-LOG_FORMAT = "'%(asctime)s %(levelname)s %(message)s'"
-LOG_FORMAT_DEBUG = "%(asctime)s %(process)d %(levelname)s %(message)s"
+LOG_FORMAT = "'%(asctime)s [PEER_ID] %(levelname)s %(message)s'"
+LOG_FORMAT_DEBUG = "%(asctime)s %(process)d [PEER_ID] %(levelname)s %(message)s"
 
 MONITOR_LOG = False
 MONITOR_LOG_HOST = 'localhost'
@@ -63,6 +63,18 @@ ENABLE_PROFILING = False
 ##########
 # GRPC ###
 ##########
+class SSLAuthType(IntEnum):
+    none = 0
+    server_only = 1
+    mutual = 2
+
+
+class KeyLoadType(IntEnum):
+    FILE_LOAD = 0
+    KMS_LOAD = 1
+    RANDOM_TABLE_DERIVATION = 2
+
+
 IP_LOCAL = '127.0.0.1'
 IP_BLOCKGENERATOR = IP_LOCAL
 IP_PEER = IP_LOCAL
@@ -87,9 +99,16 @@ MAX_WORKERS = 100
 SLEEP_SECONDS_IN_SERVICE_LOOP = 0.1  # 0.05  # multi thread 동작을 위한 최소 대기 시간 설정
 SLEEP_SECONDS_IN_SERVICE_NONE = 2  # _아무일도 하지 않는 대기 thread 의 대기 시간 설정
 GRPC_TIMEOUT = 30  # seconds
+GRPC_TIMEOUT_BROADCAST_RETRY = 6  # seconds
 GRPC_TIMEOUT_TEST = 30  # seconds
 GRPC_CONNECTION_TIMEOUT = GRPC_TIMEOUT * 2  # seconds, Connect Peer 메시지는 처리시간이 좀 더 필요함
 STUB_REUSE_TIMEOUT = 60  # minutes
+
+GRPC_SSL_TYPE = SSLAuthType.none
+GRPC_SSL_KEY_LOAD_TYPE = KeyLoadType.FILE_LOAD
+GRPC_SSL_DEFAULT_CERT_PATH = 'resources/ssl_grpc_test_cert/ssl.crt'
+GRPC_SSL_DEFAULT_KEY_PATH = 'resources/ssl_grpc_test_cert/ssl.key'
+GRPC_SSL_DEFAULT_TRUST_CERT_PATH = 'resources/ssl_grpc_test_cert/root_ca.crt'
 
 
 ##########
@@ -129,7 +148,8 @@ MAX_BLOCK_KBYTES = 3000  # default: 3000
 # 블럭의 담기는 트랜잭션의 최대 갯수, 메시지 크기를 계속 dump 로 비교하는 것은 성능에 부담이 되므로 tx 추가시에는 갯수로만 방지한다.
 # tx -> block 상황을 체크하는 것이므로 (블럭 나누기의 기준은 아니므로) 실제 블럭에는 설정값 이상의 tx 가 블럭에 담길 수 있다.
 # 실제 블럭에 담기는 tx 를 이 값으로 제어하려면 코드가 추가 되어야 한다. (이 경우 성능 저하 요인이 될 수 있다.)
-MAX_BLOCK_TX_NUM = 10000  # default: 10000
+MAX_BLOCK_TX_NUM = 1000  # default: 1000
+MAX_CREATE_TX_QUEUE = MAX_BLOCK_TX_NUM / 10  # 한 peer 의 queue 에 최대로 보관 가능한 tx 갯수, 로드 상태에서 부하를 조절한다.
 # 블럭이 합의 되는 투표율 1 = 100%, 0.5 = 50%
 VOTING_RATIO = 0.65
 # Block Height 를 level_db 의 key(bytes)로 변환할때 bytes size
@@ -200,9 +220,10 @@ CONNECTION_RETRY_TIMEOUT_WHEN_INITIAL = 5  # seconds
 CONNECTION_RETRY_TIMEOUT = 60  # seconds
 CONNECTION_RETRY_TIMEOUT_TO_RS = 60 * 5  # seconds
 CONNECTION_RETRY_TIMEOUT_TO_RS_TEST = 30  # seconds for testcase
-CONNECTION_RETRY_TIMES = 2  # times
+CONNECTION_RETRY_TIMES = 3  # times
 CONNECTION_RETRY_TIMES_TO_RS = 5  # times
 CONNECTION_TIMEOUT_TO_RS = 60 * 2  # seconds
+BROADCAST_RETRY_TIMES = 5  # times
 REQUEST_BLOCK_GENERATOR_TIMEOUT = 10  # seconds
 BLOCK_GENERATOR_BROADCAST_TIMEOUT = 5  # seconds
 WAIT_GRPC_SERVICE_START = 5  # seconds
@@ -210,6 +231,12 @@ WAIT_SECONDS_FOR_SUB_PROCESS_START = 5  # seconds
 SLEEP_SECONDS_FOR_SUB_PROCESS_START = 1  # seconds
 WAIT_SUB_PROCESS_RETRY_TIMES = 5
 PEER_GROUP_ID = ""  # "8d4e8d08-0d2c-11e7-a589-acbc32b0aaa1"  # vote group id
+ENABLE_PROCESS_MONITORING = True
+INTERVAL_SECONDS_PROCESS_MONITORING = 30  # seconds
+TX_PROCESS_NAME = "Tx Process"
+BROADCAST_PROCESS_NAME = "Broadcast Process"
+PEER_NAME = "no_name"
+IS_BROADCAST_ASYNC = True
 
 
 ##################
@@ -230,8 +257,8 @@ TOKEN_INTERVAL = 10
 # If disconnected state of the peer is maintained, That peer will removed from peer list after this minutes.
 TIMEOUT_PEER_REMOVE_IN_LIST = 5  # minutes, replace by NO_RESPONSE_COUNT_ALLOW_BY_HEARTBEAT
 IS_LOAD_PEER_MANAGER_FROM_DB = False
-LOOPCHAIN_DEFAULT_CHANNEL = "kofia_certificate"  # Default Channel Name
-LOOPCHAIN_TEST_CHANNEL = "kofia_fine"
+LOOPCHAIN_DEFAULT_CHANNEL = "loopchain_default"  # Default Channel Name
+LOOPCHAIN_TEST_CHANNEL = "loopchain_test"
 CHANNEL_MANAGE_DATA_PATH = os.path.join(LOOPCHAIN_ROOT_PATH, 'channel_manage_data.json')  # Channel Manage Data Path
 ENABLE_CHANNEL_AUTH = False  # if this option is true, peer only gets channel infos to which it belongs.
 
@@ -247,16 +274,33 @@ TOKEN_TYPE_SIGN = "02"
 ###############
 # Signature ###
 ###############
-IS_KEY_FILE_LOAD = True
-PRIVATE_PATH = os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der')
-PUBLIC_PATH = os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der')
-DEFAULT_PW = b'test'
-ENABLE_KMS = False
-RANDOM_TABLE_SIZE = 128
-RANDOM_SIZE = 128
-FIRST_SEED = 50
-SECOND_SEED = 25
-MY_SEED = 123456  # for create pki added data
+CHANNEL_OPTION = {
+    "loopchain_default": {
+        "load_cert": False,
+        "consensus_cert_use": False,
+        "tx_cert_use": False,
+        "key_load_type": KeyLoadType.FILE_LOAD,
+        "public_path": os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+        "private_path": os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+        "private_password": b'test'
+    },
+    "loopchain_test": {
+        "load_cert": False,
+        "consensus_cert_use": False,
+        "tx_cert_use": False,
+        "key_load_type": KeyLoadType.FILE_LOAD,
+        "public_path": os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+        "private_path": os.path.join(LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+        "private_password": b'test'
+    }
+}
+
+# KMS
+KMS_AGENT_PASSWORD = ""
+KMS_SIGNATURE_KEY_ID = ""
+KMS_SIGNATURE_KEY_ID_LIST = {}
+KMS_TLS_KEY_ID = ""
+
 
 
 ####################

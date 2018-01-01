@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,63 +13,144 @@
 # limitations under the License.
 """ A class for authorization of Peer """
 
+import binascii
 import datetime
 import logging
-import binascii
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding, ec, utils
+from cryptography.x509 import Certificate
 
 import loopchain.utils as util
-from loopchain.tools import PublicVerifier
 from loopchain import configure as conf
+from loopchain.configure_default import KeyLoadType
+from loopchain.tools.signature_helper import PublicVerifier
 
 
 class PeerAuthorization(PublicVerifier):
-    """ Peer의 인증을 처리한다 """
-    __peer_pri = None
+    """Peer의 인증을 처리한다"""
     __ca_cert = None
     __token = None
 
     # RequestPeer 요청 생성 시 저장 정보
     __peer_info = None
 
-    def __init__(self, public_file="", pri_file="", cert_pass="", rand_table=None):
+    def __init__(self, channel, rand_table=None):
+        """create key_pair for signature using conf.CHANNEL_OPTION
+
+        :param channel: channel name
+        :param rand_table: for RandomTable Derivation key set, create using table
+        :param agent_pin: for KMS, kms connection agent pin
+        """
+
+        super().__init__(channel)
+        self.__peer_pri = None
+
+        # option check
+        if not self._channel_option[self.LOAD_CERT]:
+            if self._channel_option[self.CONSENSUS_CERT_USE] or self._channel_option[self.TX_CERT_USE]:
+                logging.error("public key load type can't use cert")
+                util.exit_and_msg("public key load type can't use cert")
 
         try:
-            if conf.ENABLE_KMS:
+            if self._channel_option[self.KEY_LOAD_TYPE] == conf.KeyLoadType.FILE_LOAD:
+                logging.info("key load type : file load")
+                logging.info(f"public file : {conf.CHANNEL_OPTION[self._channel][self.PUBLIC_PATH]}")
+                logging.info(f"private file : {conf.CHANNEL_OPTION[self._channel][self.PRIVATE_PATH]}")
+
+                # load public key
+                with open(conf.CHANNEL_OPTION[self._channel][self.PUBLIC_PATH], "rb") as public:
+                    public_bytes = public.read()
+                    if conf.CHANNEL_OPTION[self._channel][self.LOAD_CERT]:
+                        self.__load_cert(public_bytes)
+                    else:
+                        self.__load_public(public_bytes)
+
+                # load private key
+                self.__load_private(pri_path=conf.CHANNEL_OPTION[self._channel][self.PRIVATE_PATH],
+                                    pri_pass=conf.CHANNEL_OPTION[self._channel][self.PRIVATE_PASSWORD])
+
+            elif self._channel_option[self.KEY_LOAD_TYPE] == conf.KeyLoadType.KMS_LOAD:
+                from loopchain.tools.kms_helper import KmsHelper
+                cert, private = KmsHelper().get_signature_cert_pair(conf.CHANNEL_OPTION[self._channel][self.KEY_ID])
+                # KMS not support public key load
+                if conf.CHANNEL_OPTION[self._channel][self.LOAD_CERT]:
+                    self.__load_cert(cert)
+                else:
+                    raise Exception("KMS Load does't support public key load")
+
+                self.__load_private_byte(private)
+
+            elif self._channel_option[self.KEY_LOAD_TYPE] == KeyLoadType.RANDOM_TABLE_DERIVATION:
+                logging.info("key load type : random table derivation")
+                # Random Table derivation not support cert key load
+                if conf.CHANNEL_OPTION[self._channel][self.LOAD_CERT]:
+                    raise Exception("KMS Load does't support public key load")
+
                 self.__peer_pri = self.__key_derivation(rand_table)
-                super().__init__(self.__peer_pri.public_key())
+                self._load_public_from_object(self.__peer_pri.public_key())
 
             else:
-                logging.debug(f"public file : {public_file}")
-                logging.debug(f"private file : {pri_file}")
-
-                with open(public_file, "rb") as der:
-                    public_bytes = der.read()
-                    super().__init__(public_bytes)
-
-                self.__load_private(pri_file, cert_pass)
+                raise Exception(f"conf.KEY_LOAD_TYPE : {conf.CHANNEL_OPTION[channel][self.KEY_LOAD_TYPE]}"
+                                f"\nkey load option is wrong")
 
         except Exception as e:
+            logging.error(e)
             util.exit_and_msg(f"key load fail cause : {e}")
 
-    def __load_private(self, pri_file, cert_pass):
+    def __load_public(self, public_bytes):
+        """load certificate
+
+        :param public_bytes: der or pem format certificate
+        """
+        try:
+            self._load_public_from_der(public_bytes)
+        except Exception as e:
+            self._load_public_from_pem(public_bytes)
+
+    def __load_cert(self, cert_bytes: bytes):
+        """load certificate
+
+        :param cert_bytes: der or pem format certificate
+        """
+        try:
+            cert: Certificate = self._load_cert_from_der(cert_bytes)
+        except Exception as e:
+            cert: Certificate = self._load_cert_from_pem(cert_bytes)
+
+    def __load_private(self, pri_path, pri_pass=None):
         """인증서 로드
 
-        :param pri_file: 개인키 경로
-        :param cert_pass: 개인키 패스워드
+        :param pri_path: 개인키 경로
+        :param pri_pass: 개인키 패스워드
         :return:
         """
+        if isinstance(pri_pass, str):
+            pri_pass = pri_pass.encode()
         # 인증서/개인키 로드
-        with open(pri_file, "rb") as der:
+        with open(pri_path, "rb") as der:
             private_bytes = der.read()
+        self.__load_private_byte(private_bytes, pri_pass)
+
+    def __load_private_byte(self, private_bytes, private_pass=None):
+        """private load from bytes string
+
+        :param private_bytes: private byte
+        :param private_pass: private password
+        :return:
+        """
+
+        try:
             try:
-                self.__peer_pri = serialization.load_der_private_key(private_bytes, cert_pass, default_backend())
-            except ValueError as e:
-                logging.exception(f"error {e}")
-                util.exit_and_msg("Invalid Password")
+                self.__peer_pri = serialization.load_der_private_key(private_bytes, private_pass, default_backend())
+            except Exception as e:
+                # try pem type private load
+                self.__peer_pri = serialization.load_pem_private_key(private_bytes, private_pass, default_backend())
+
+        except ValueError as e:
+            logging.exception(f"error {e}")
+            util.exit_and_msg("Invalid Password")
 
         # 키 쌍 검증
         sign = self.sign_data(b'TEST')
@@ -143,11 +224,10 @@ class PeerAuthorization(PublicVerifier):
 
     @staticmethod
     def __key_derivation(rand_table):
-        """ key derivation using rand_table and conf.FIRST_SEED conf.SECOND_SEED
+        """key derivation using rand_table and conf.FIRST_SEED conf.SECOND_SEED
 
         :param rand_table:
         :return: private_key
         """
-
         hash_value = rand_table[conf.FIRST_SEED] + rand_table[conf.SECOND_SEED] + conf.MY_SEED
         return ec.derive_private_key(hash_value, ec.SECP256K1(), default_backend())

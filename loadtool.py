@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ import sys
 import logging
 import getopt
 import timeit
-import grpc
 import json
 import loopchain.utils as util
 from loopchain import configure as conf
+from loopchain.tools.grpc_helper import GRPCHelper
 from multiprocessing import Pool, current_process
 
 sys.path.append("loopchain/protos")
@@ -40,7 +40,7 @@ def client_process(argv):
     print("duration: " + str(duration))
     print("method_name: " + method_name)
 
-    channel = grpc.insecure_channel(peer_target)
+    channel = GRPCHelper().create_client_channel(peer_target)
     peer_stub = loopchain_pb2_grpc.PeerServiceStub(channel)
 
     method = getattr(peer_stub, method_name)

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,20 +14,21 @@
 """A module for restful API server of Peer"""
 
 import json
-import grpc
 import logging
 import ssl
 import _ssl
 import base64
+import setproctitle
 
 from grpc._channel import _Rendezvous
 
-import loopchain.utils as util
-from loopchain.components import SingletonMetaClass
-from loopchain.baseservice import CommonThread
 from flask import Flask, request
 from flask_restful import reqparse, Api, Resource
+
+from loopchain.components import SingletonMetaClass
+from loopchain.baseservice import CommonThread, StubManager
 from loopchain.protos import loopchain_pb2, loopchain_pb2_grpc, message_code
+from loopchain.tools.grpc_helper import GRPCHelper
 from loopchain import configure as conf
 
 
@@ -77,8 +78,8 @@ class ServerComponents(metaclass=SingletonMetaClass):
         return self.__ssl_context
 
     def set_stub_port(self, port, IP_address):
-        self.__stub_to_peer_service = loopchain_pb2_grpc.PeerServiceStub(
-            grpc.insecure_channel(IP_address + ':' + str(port)))
+        self.__stub_to_peer_service = StubManager(
+            IP_address + ':' + str(port), loopchain_pb2_grpc.PeerServiceStub, conf.GRPC_SSL_TYPE)
 
     def set_argument(self):
         self.__parser.add_argument('hash')
@@ -94,48 +95,56 @@ class ServerComponents(metaclass=SingletonMetaClass):
 
     def query(self, data, channel):
         # TODO conf.SCORE_RETRY_TIMES 를 사용해서 retry 로직을 구현한다.
-        return self.__stub_to_peer_service.Query(loopchain_pb2.QueryRequest(params=data, channel=channel),
-                                                 self.REST_SCORE_QUERY_TIMEOUT)
+        return self.__stub_to_peer_service.call("Query",
+                                                loopchain_pb2.QueryRequest(params=data, channel=channel),
+                                                self.REST_SCORE_QUERY_TIMEOUT)
 
     def create_transaction(self, data, channel):
         # logging.debug("Grpc Create Tx Data : " + data)
-        return self.__stub_to_peer_service.CreateTx(loopchain_pb2.CreateTxRequest(data=data, channel=channel)
-                                                    , self.REST_GRPC_TIMEOUT)
+        return self.__stub_to_peer_service.call("CreateTx",
+                                                loopchain_pb2.CreateTxRequest(data=data, channel=channel),
+                                                self.REST_GRPC_TIMEOUT)
 
     def get_transaction(self, tx_hash, channel):
-        return self.__stub_to_peer_service.GetTx(loopchain_pb2.GetTxRequest(tx_hash=tx_hash, channel=channel), self.REST_GRPC_TIMEOUT)
+        return self.__stub_to_peer_service.call("GetTx",
+                                                loopchain_pb2.GetTxRequest(tx_hash=tx_hash, channel=channel),
+                                                self.REST_GRPC_TIMEOUT)
 
     def get_invoke_result(self, tx_hash, channel):
-        return self.__stub_to_peer_service.GetInvokeResult(loopchain_pb2.GetInvokeResultRequest(
-            tx_hash=tx_hash, channel=channel), self.REST_GRPC_TIMEOUT)
+        return self.__stub_to_peer_service.call("GetInvokeResult",
+                                                loopchain_pb2.GetInvokeResultRequest(tx_hash=tx_hash, channel=channel),
+                                                self.REST_GRPC_TIMEOUT)
 
     def get_status(self, channel):
-        return self.__stub_to_peer_service.GetStatus(loopchain_pb2.StatusRequest(request="", channel= channel), self.REST_GRPC_TIMEOUT)
+        return self.__stub_to_peer_service.call("GetStatus",
+                                                loopchain_pb2.StatusRequest(request="", channel=channel),
+                                                self.REST_GRPC_TIMEOUT)
 
     def get_score_status(self, channel):
-        return self.__stub_to_peer_service.GetScoreStatus(loopchain_pb2.StatusRequest(request="", channel=channel),
-                                                          self.REST_GRPC_TIMEOUT)
+        return self.__stub_to_peer_service.call("GetScoreStatus",
+                                                loopchain_pb2.StatusRequest(request="", channel=channel),
+                                                self.REST_GRPC_TIMEOUT)
 
     def get_block(self, block_hash="", block_height=-1,
                   block_data_filter="prev_block_hash, height, block_hash",
                   tx_data_filter="tx_hash",
                   channel=conf.LOOPCHAIN_DEFAULT_CHANNEL):
 
-        response = self.__stub_to_peer_service.GetBlock(
-            loopchain_pb2.GetBlockRequest(
-                block_hash=block_hash,
-                block_height=block_height,
-                block_data_filter=block_data_filter,
-                tx_data_filter=tx_data_filter,
-                channel=channel),
-                self.REST_GRPC_TIMEOUT
-            )
+        response = self.__stub_to_peer_service.call("GetBlock",
+                                                    loopchain_pb2.GetBlockRequest(
+                                                        block_hash=block_hash,
+                                                        block_height=block_height,
+                                                        block_data_filter=block_data_filter,
+                                                        tx_data_filter=tx_data_filter,
+                                                        channel=channel),
+                                                    self.REST_GRPC_TIMEOUT)
 
         return response
 
     def get_last_block_hash(self, channel):
-        response = self.__stub_to_peer_service.GetLastBlockHash(
-            loopchain_pb2.CommonRequest(request="", channel=channel), self.REST_GRPC_TIMEOUT)
+        response = self.__stub_to_peer_service.call("GetLastBlockHash",
+                                                    loopchain_pb2.CommonRequest(request="", channel=channel),
+                                                    self.REST_GRPC_TIMEOUT)
         return str(response.block_hash)
 
     def get_block_by_hash(self, block_hash="",
@@ -318,7 +327,6 @@ class Blocks(Resource):
         return block_data
 
 
-
 class RestServer(CommonThread):
     def __init__(self, peer_port, peer_ip_address=None):
         if peer_ip_address is None:
@@ -334,5 +342,6 @@ class RestServer(CommonThread):
         api_port = self.__peer_port + conf.PORT_DIFF_REST_SERVICE_CONTAINER
         host='0.0.0.0'
         logging.debug("RestServer run... %s", str(api_port))
+        setproctitle.setproctitle(f"{setproctitle.getproctitle()} RestServer api_port({api_port})")
         ServerComponents().app.run(port=api_port, host='0.0.0.0',
                                    debug=False, ssl_context=ServerComponents().ssl_context)

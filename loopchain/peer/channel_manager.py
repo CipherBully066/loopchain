@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,14 +16,13 @@ import json
 import leveldb
 import logging
 import pickle
-
 import time
 
 import loopchain.utils as util
 from loopchain import configure as conf
-from loopchain.baseservice import PeerManager, StubManager, ObjectManager
+from loopchain.baseservice import PeerManager, StubManager, ObjectManager, BroadcastProcess
 from loopchain.container import CommonService, ScoreService
-from loopchain.peer import BlockManager
+from loopchain.peer import BlockManager, SendToProcess
 from loopchain.protos import loopchain_pb2_grpc, message_code, loopchain_pb2
 
 
@@ -38,11 +37,87 @@ class ChannelManager:
         self.__level_db_identity = level_db_identity
         self.__peer_managers = {}  # key(channel_name):value(peer_manager)
         self.__block_managers = {}  # key(channel_name):value(block_manager), This available only peer
-        self.__score_containers = {}
-        self.__score_stubs = {}
-        self.__score_infos = {}
+        self.__tx_send_to_process_thread = {}  # key(channel_name):value(thread), This available only peer
+        self.__tx_processes = {}  # key(channel_name):value(tx_process), This available only peer
+        self.__broadcast_processes = {}  # key(channel_name):value(broadcast_process)
+        self.__score_containers = {}  # key(channel_name):value(score containers)
+        self.__score_stubs = {}  # key(channel_name):value(score stub)
+        self.__score_infos = {}  # key(channel_name):value(score info)
+        self.__peer_auths = {}  # key(channel_name):value(peer_auth)
+        self.__init_peer_auths()
+
         if ObjectManager().rs_service is not None:
-            self.__load_peer_managers()
+            self.__init_rs_channel_manager()
+
+    def start_broadcast_process(self, peer_id, peer_target, inner_target, channel):
+        if inner_target is not None:
+            #  rs has no tx process
+            self.__tx_send_to_process_thread[channel] = SendToProcess()
+            self.start_process(
+                process_name=conf.TX_PROCESS_NAME,
+                self_target=peer_target,
+                notify_target=inner_target,
+                channel=channel)
+            self.__tx_send_to_process_thread[channel].start()
+
+        self.start_process(
+            process_name=conf.BROADCAST_PROCESS_NAME,
+            self_target=peer_target,
+            notify_target=inner_target,
+            channel=channel)
+
+        if peer_id is not None:
+            self.__broadcast_processes[channel].set_to_process(
+                BroadcastProcess.PROCESS_INFO_KEY, f"peer_id({peer_id})")
+
+        return True
+
+    def __init_peer_auths(self):
+        for channel in list(conf.CHANNEL_OPTION):
+            from loopchain.peer import PeerAuthorization
+            self.__peer_auths[channel] = PeerAuthorization(channel)
+
+    def start_process(self, process_name, self_target, notify_target, channel, is_audience_update=False):
+        process = BroadcastProcess(process_name=process_name, channel=channel, self_target=notify_target)
+        process.start()
+
+        wait_times = 0
+        wait_for_process_start = None
+
+        # TODO process wait loop 를 살리고 시간을 조정하였음, 이 상태에서 tx process 가 AWS infra 에서 시작되는지 확인 필요.
+        # time.sleep(conf.WAIT_SECONDS_FOR_SUB_PROCESS_START)
+
+        while wait_for_process_start is None:
+            time.sleep(conf.SLEEP_SECONDS_FOR_SUB_PROCESS_START)
+            logging.debug(f"wait start {process_name}({channel})....")
+            process.send_to_process(("status", ""))
+            wait_for_process_start = process.get_receive("status")
+
+            if wait_for_process_start is None and wait_times > conf.WAIT_SUB_PROCESS_RETRY_TIMES:
+                util.exit_and_msg(f"{process_name} start Fail!({channel})")
+
+            wait_times += 1
+
+        logging.debug(f"{process_name} start({wait_for_process_start}) channel({channel})")
+
+        if len(process_name.split(conf.TX_PROCESS_NAME)) > 1:
+            self.__tx_send_to_process_thread[channel].set_process(process)
+            self.__tx_processes[channel] = process
+            process.send_to_process((BroadcastProcess.SUBSCRIBE_COMMAND, self_target))
+        else:
+            self.__broadcast_processes[channel] = process
+
+        util.logger.spam(f"channel_manager:start_process notify_target({notify_target})")
+        if notify_target is not None:
+            # TODO Restart 시 아래 로직이 동작하지 않는다.
+            process.send_to_process(
+                (BroadcastProcess.MAKE_SELF_PEER_CONNECTION_COMMAND, notify_target))
+
+        if is_audience_update:
+            audience_dump = self.__peer_managers[channel].dump()
+            process.send_to_process((BroadcastProcess.UPDATE_AUDIENCE_COMMAND, audience_dump))
+
+        return process
 
     def load_block_manager(self, peer_id=None, channel=None):
         if channel is None:
@@ -50,6 +125,7 @@ class ChannelManager:
         logging.debug(f"load_block_manager_each channel({channel})")
         try:
             self.__block_managers[channel] = BlockManager(
+                channel_manager=self,
                 common_service=self.__common_service,
                 peer_id=peer_id,
                 channel_name=channel,
@@ -72,16 +148,100 @@ class ChannelManager:
         try:
             return self.__block_managers[channel_name]
         except KeyError as e:
-            util.logger.warning(f"channel_manager:get_block_manager there is no channel({channel_name})")
+            logging.warning(f"channel_manager:get_block_manager there is no channel({channel_name})")
             return None
 
-    def start_block_managers(self):
-        for block_manager in self.__block_managers:
-            self.__block_managers[block_manager].start()
+    def get_broadcast_process(self, channel) -> BroadcastProcess:
+        if channel is None:
+            channel = conf.LOOPCHAIN_DEFAULT_CHANNEL
+        try:
+            return self.__broadcast_processes[channel]
+        except KeyError as e:
+            logging.warning(f"channel_manager:get_broadcast_process there is no channel({channel})")
+            return None
+
+    def get_peer_auth(self, channel):
+        if channel is None:
+            channel = conf.LOOPCHAIN_DEFAULT_CHANNEL
+        try:
+            return self.__peer_auths[channel]
+        except KeyError as e:
+            logging.warning(f"channel_manager:get_peer_auth there is no channel({channel})")
+            return None
+
+    def send_to_tx_process(self, channel, job):
+        if channel in self.__tx_send_to_process_thread.keys():
+            return self.__tx_send_to_process_thread[channel].send_to_process(job)
+        else:
+            logging.warning(f"channel_manager:get_tx_send_to_process_thread there is no channel({channel})")
+            return False
+
+    def add_audience(self, channel: str, peer_target: str):
+        if channel in self.__tx_processes.keys():
+            self.__tx_processes[channel].send_to_process((BroadcastProcess.SUBSCRIBE_COMMAND, peer_target))
+        else:
+            logging.debug(f"channel_manager:add_audience no channel({channel}) in tx_processes")
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process((BroadcastProcess.SUBSCRIBE_COMMAND, peer_target))
+        else:
+            logging.debug(f"channel_manager:add_audience no channel({channel}) in broadcast_processes")
+
+    def remove_audience(self, channel, peer_target):
+        if channel in self.__tx_processes.keys():
+            self.__tx_processes[channel].send_to_process((BroadcastProcess.UNSUBSCRIBE_COMMAND, peer_target))
+        else:
+            logging.debug(f"channel_manager:remove_audience no channel({channel}) in tx_processes")
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process((BroadcastProcess.UNSUBSCRIBE_COMMAND, peer_target))
+        else:
+            logging.debug(f"channel_manager:remove_audience no channel({channel}) in broadcast_processes")
+
+    def update_audience(self, channel, peer_manager_dump):
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process(
+                (BroadcastProcess.UPDATE_AUDIENCE_COMMAND, peer_manager_dump))
+        else:
+            logging.debug(f"channel_manager:update_audience no channel({channel}) in broadcast_processes")
+
+    def broadcast(self, channel, method_name, method_param, response_handler=None):
+        """등록된 모든 Peer 의 동일한 gRPC method 를 같은 파라미터로 호출한다.
+        """
+        # logging.warning("broadcast in process ==========================")
+        # logging.debug("pickle method_param: " + str(pickle.dumps(method_param)))
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process(
+                (BroadcastProcess.BROADCAST_COMMAND, (method_name, method_param)))
+        else:
+            logging.debug(f"channel_manager:broadcast no channel({channel}) in broadcast_processes")
+
+    def broadcast_audience_set(self, channel):
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process((BroadcastProcess.STATUS_COMMAND, "audience set"))
+        else:
+            logging.debug(f"channel_manager:broadcast_audience_set no channel({channel}) in broadcast_processes")
+
+    def subscribe(self, channel, subscribe_target):
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].send_to_process((BroadcastProcess.SUBSCRIBE_COMMAND, subscribe_target))
+        else:
+            logging.debug(f"channel_manager:subscribe no channel({channel}) in broadcast_processes")
+
+    def tx_process_connect_to_leader(self, channel, leader_target):
+        if channel in self.__tx_processes.keys():
+            self.__tx_processes[channel].send_to_process((BroadcastProcess.CONNECT_TO_LEADER_COMMAND, leader_target))
+            self.__tx_processes[channel].send_to_process((BroadcastProcess.SUBSCRIBE_COMMAND, leader_target))
+        else:
+            logging.debug(f"channel_manager:tx_process_connect_to_leader no channel({channel}) in tx_processes")
+
+    def start_block_manager(self, channel):
+        self.__block_managers[channel].start()
+
+    def stop_block_manager(self, channel):
+        self.__block_managers[channel].stop()
 
     def stop_block_managers(self):
-        for block_manager in self.__block_managers:
-            self.__block_managers[block_manager].stop()
+        for channel in list(self.__block_managers.keys()):
+            self.__block_managers[channel].stop()
 
     def remove_peer(self, peer_id, group_id):
         for peer_manager in self.__peer_managers:
@@ -115,9 +275,10 @@ class ChannelManager:
         except AttributeError as e:
             logging.warning("Fail Save Peer_list: " + str(e))
 
-    def __load_peer_managers(self):
+    def __init_rs_channel_manager(self):
         for channel in ObjectManager().rs_service.admin_manager.get_channel_list():
             self.load_peer_manager(channel)
+            self.start_broadcast_process(peer_id=None, peer_target=None, inner_target=None, channel=channel)
 
     def load_peer_manager(self, channel=None):
         """leveldb 로 부터 peer_manager 를 가져온다.
@@ -163,27 +324,34 @@ class ChannelManager:
 
         return authorized_channels
 
-    def load_score_container_each(self, channel_name: str, score_package: str, container_port: int, peer_target: str):
+    def load_score_container(self, channel: str, score_package: str, container_port: int, peer_target: str):
         """create score container and save score_info and score_stub
 
-        :param channel_name: channel name
+        :param channel: channel name
         :param score_package: load score package name
         :param container_port: score container port
-        :return:
+        :param peer_target: peer_target
         """
         score_info = None
         retry_times = 1
 
+        start_param_set = dict()
+        start_param_set["channel_name"] = channel
+        start_param_set["score_package"] = score_package
+        start_param_set["container_port"] = container_port
+        start_param_set["peer_target"] = peer_target
+
         while score_info is None:
             if util.check_port_using(conf.IP_PEER, container_port) is False:
                 util.logger.spam(f"channel_manager:load_score_container_each init ScoreService port({container_port})")
-                self.__score_containers[channel_name] = ScoreService(container_port)
-                self.__score_stubs[channel_name] = StubManager.get_stub_manager_to_server(
+                self.__score_containers[channel] = ScoreService(container_port, channel, start_param_set)
+                self.__score_stubs[channel] = StubManager.get_stub_manager_to_server(
                     conf.IP_PEER + ':' + str(container_port),
                     loopchain_pb2_grpc.ContainerStub,
-                    is_allow_null_stub=True
+                    is_allow_null_stub=True,
+                    ssl_auth_type=conf.SSLAuthType.none
                 )
-            score_info = self.__load_score(score_package, self.get_score_container_stub(channel_name), peer_target)
+            score_info = self.__load_score(score_package, self.get_score_container_stub(channel), peer_target)
 
             if score_info is not None or retry_times >= conf.SCORE_LOAD_RETRY_TIMES:
                 break
@@ -195,7 +363,7 @@ class ChannelManager:
         if score_info is None:
             return False
 
-        self.__score_infos[channel_name] = score_info
+        self.__score_infos[channel] = score_info
 
         return True
 
@@ -272,13 +440,28 @@ class ChannelManager:
             channel_name = conf.LOOPCHAIN_DEFAULT_CHANNEL
         return self.__score_infos[channel_name]
 
+    def stop_score_container(self, channel):
+        self.__score_containers[channel].stop()
+
+        # Stop Also Channel Processes
+        if channel in self.__tx_processes.keys():
+            self.__tx_send_to_process_thread[channel].stop()
+            self.__tx_send_to_process_thread[channel].wait()
+
+            self.__tx_processes[channel].stop()
+            self.__tx_processes[channel].wait()
+
+        if channel in self.__broadcast_processes.keys():
+            self.__broadcast_processes[channel].stop()
+            self.__broadcast_processes[channel].wait()
+
     def stop_score_containers(self):
-        """stop all score containers and init all properties
+        """stop all score containers and init all properties and this also stop broadcast processes
 
         :return:
         """
         for channel in self.__score_containers.keys():
-            self.__score_containers[channel].stop()
+            self.stop_score_container(channel)
 
         self.__score_containers = {}
         self.__score_infos = {}

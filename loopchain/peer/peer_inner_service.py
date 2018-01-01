@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -244,35 +244,6 @@ class InnerService(loopchain_pb2_grpc.InnerServiceServicer):
 
         return loopchain_pb2.QueryReply(response_code=response_code,
                                         response=response)
-
-    def Subscribe(self, request, context):
-        """BlockGenerator 가 broadcast(unconfirmed or confirmed block) 하는 채널에
-        Peer 를 등록한다.
-
-        :param request:
-        :param context:
-        :return:
-        """
-        if request.peer_id == "":
-            return loopchain_pb2.CommonReply(
-                response_code=message_code.get_response_code(message_code.Response.fail_wrong_subscribe_info),
-                message=message_code.get_response_msg(message_code.Response.fail_wrong_subscribe_info)
-            )
-        else:
-            self.peer_service.common_service.add_audience(request)
-
-        return loopchain_pb2.CommonReply(response_code=message_code.get_response_code(message_code.Response.success),
-                                         message=message_code.get_response_msg(message_code.Response.success))
-
-    def UnSubscribe(self, request, context):
-        """BlockGenerator 의 broadcast 채널에서 Peer 를 제외한다.
-
-        :param request:
-        :param context:
-        :return:
-        """
-        self.peer_service.common_service.remove_audience(request.peer_id, request.peer_target)
-        return loopchain_pb2.CommonReply(response_code=0, message="success")
 
     def NotifyLeaderBroken(self, request, context):
         channel_name = conf.LOOPCHAIN_DEFAULT_CHANNEL if request.channel == '' else request.channel

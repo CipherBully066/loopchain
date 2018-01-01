@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,11 +29,12 @@ from loopchain.protos import loopchain_pb2, message_code
 
 class StubManager:
 
-    def __init__(self, target, stub_type, is_secure=False):
+    def __init__(self, target, stub_type, ssl_auth_type=conf.SSLAuthType.none):
         self.__target = target
         self.__stub_type = stub_type
-        self.__is_secure = is_secure
+        self.__ssl_auth_type = ssl_auth_type
         self.__stub = None
+        self.__channel = None
         self.__stub_update_time = datetime.datetime.now()
 
         self.__make_stub(False)
@@ -42,14 +43,9 @@ class StubManager:
         if util.datetime_diff_in_mins(self.__stub_update_time) >= conf.STUB_REUSE_TIMEOUT or \
                 not is_stub_reuse or self.__stub is None:
             util.logger.spam(f"StubManager:__make_stub is_stub_reuse({is_stub_reuse}) self.__stub({self.__stub})")
-            self.__stub = util.get_stub_to_server(self.__target, self.__stub_type, is_check_status=False)
-            # if self.__is_secure:
-            #     # TODO need treat to secure channel but not yet
-            #     channel = grpc.insecure_channel(self.__target)
-            # else:
-            #     channel = grpc.insecure_channel(self.__target)
-            #
-            # self.__stub = self.__stub_type(channel)
+
+            self.__stub, self.__channel = util.get_stub_to_server(
+                self.__target, self.__stub_type, is_check_status=False, ssl_auth_type=self.__ssl_auth_type)
             self.__stub_update_time = datetime.datetime.now()
         else:
             pass
@@ -91,15 +87,17 @@ class StubManager:
             logging.warning(f"call_async fail  : {result}\n"
                             f"cause by : {result.details()}")
 
-    def call_async(self, method_name, message, timeout=None, is_stub_reuse=True):
+    def call_async(self, method_name, message, call_back=None, timeout=None, is_stub_reuse=True):
         if timeout is None:
             timeout = conf.GRPC_TIMEOUT
+        if call_back is None:
+            call_back = self.print_broadcast_fail
         self.__make_stub(is_stub_reuse)
 
         try:
             stub_method = getattr(self.__stub, method_name)
             feature_future = stub_method.future(message, timeout)
-            feature_future.add_done_callback(self.print_broadcast_fail)
+            feature_future.add_done_callback(call_back)
         except Exception as e:
             logging.warning(f"gRPC call_async fail method_name({method_name}), message({message}): {e}")
 
@@ -138,7 +136,7 @@ class StubManager:
         return None
 
     def call_in_times(self, method_name, message,
-                      retry_times=conf.CONNECTION_RETRY_TIMES,
+                      retry_times=None,
                       is_stub_reuse=True,
                       timeout=conf.GRPC_TIMEOUT):
         """Try gRPC call. If it fails try again until "retry_times"
@@ -150,6 +148,7 @@ class StubManager:
         :param timeout:
         :return:
         """
+        retry_times = conf.BROADCAST_RETRY_TIMES if retry_times is None else retry_times
 
         self.__make_stub(is_stub_reuse)
         stub_method = getattr(self.__stub, method_name)
@@ -176,7 +175,7 @@ class StubManager:
 
     @staticmethod
     def get_stub_manager_to_server(target, stub_class, time_out_seconds=None,
-                                   is_allow_null_stub=False):
+                                   is_allow_null_stub=False, ssl_auth_type=conf.SSLAuthType.none):
         """gRPC connection to server
 
         :return: stub manager to server
@@ -184,14 +183,16 @@ class StubManager:
 
         if time_out_seconds is None:
             time_out_seconds = conf.CONNECTION_RETRY_TIMEOUT
-        stub_manager = StubManager(target, stub_class)
+        stub_manager = StubManager(target, stub_class, ssl_auth_type)
         start_time = timeit.default_timer()
         duration = timeit.default_timer() - start_time
 
         while duration < time_out_seconds:
             try:
                 logging.debug("(stub_manager) get stub to server target: " + str(target))
-                stub_manager.stub.Request(loopchain_pb2.Message(code=message_code.Request.status), conf.GRPC_TIMEOUT)
+                stub_manager.stub.Request(loopchain_pb2.Message(
+                    code=message_code.Request.status,
+                    message="get_stub_manager_to_server"), conf.GRPC_TIMEOUT)
                 return stub_manager
             except Exception as e:
                 if is_allow_null_stub:

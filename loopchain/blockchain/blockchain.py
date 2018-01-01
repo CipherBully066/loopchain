@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,11 @@ from fluent import event
 
 import loopchain.utils as util
 from loopchain import configure as conf
-from loopchain.baseservice import ObjectManager
+from loopchain.baseservice import ScoreResponse, ObjectManager
 from loopchain.blockchain import BlockStatus, Block
 from loopchain.blockchain.exception import *
 from loopchain.blockchain.score_base import *
 from loopchain.protos import message_code
-from loopchain.scoreservice import ScoreResponse
 
 
 class BlockChain:
@@ -79,6 +78,10 @@ class BlockChain:
 
         # made block count as a leader
         self.__made_block_count = 0
+
+    def close_blockchain_db(self):
+        del self.__confirmed_block_db
+        self.__confirmed_block_db = None
 
     @property
     def block_height(self):
@@ -219,6 +222,8 @@ class BlockChain:
         util.apm_event(self.__peer_id, {
             'event_type': 'AddBlock',
             'peer_id': self.__peer_id,
+            'peer_name': conf.PEER_NAME,
+            'channel_name': self.__channel_name,
             'data': {
                 'block_height': self.__block_height,
                 'block_type': block.block_type.name}})
@@ -263,7 +268,7 @@ class BlockChain:
         except KeyError as e:
             # Client 의 잘못된 요청이 있을 수 있으므로 Warning 처리후 None 을 리턴한다.
             # 시스템 Error 로 처리하지 않는다.
-            logging.warning("blockchain::find_tx_by_key KeyError: " + str(e))
+            logging.warning("[blockchain::find_tx_by_key] Transaction is pending.")
             return None
         if tx_info_json is None:
             logging.warning("tx not found")

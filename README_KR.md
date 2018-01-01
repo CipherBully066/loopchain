@@ -97,7 +97,7 @@ loopchain의 설정값은 기본적으로 파일로 관리합니다.
 * ./loopchain/**configure.json**
     - 파일 형식은 json으로 하되, 파일 경로는 사용자가 자유롭게 지정할 수 있습니다.
     - 모든 설정 파일(configure_default.py, configure_user.py 등) 중 적용되는 **우선순위가 가장 높습니다.**
-    - `peer.py`와 `radiostation.py`를 실행할 때 각각 `-o {파일 경로}` 혹은 `--configure_file_path {파일 경로}` 옵션을 뒤에 추가하여 적용할 수 있습니다.
+    - `peer`와 `radiostation`를 실행할 때 각각 `-o {파일 경로}` 혹은 `--configure_file_path {파일 경로}` 옵션을 뒤에 추가하여 적용할 수 있습니다.
 
 #### 예시
 만약에 “PORT_PEER” 경로를 7500으로 변경하고자 한다고 가정하면, loopchain/configure.json 파일에 다음과 같이 설정을 추가합니다.
@@ -110,10 +110,10 @@ loopchain의 설정값은 기본적으로 파일로 관리합니다.
 
 이후 Peer를 띄울 때, 둘 중 하나의 명령어로 옵션을 추가하여 실행하면 기존의 설정값이 json의 값으로 변경이 됩니다.
 ```
-$ ./peer.py -o loopchain/configure.json   # 혹은
-$ ./peer.py --configure_file_path loopchain/configure.json
+$ ./loopchain.py peer -o loopchain/configure.json   # 혹은
+$ ./loopchain.py peer --configure_file_path loopchain/configure.json
 ```
-`radiostation.py`에도 똑같은 방법으로 적용이 가능합니다.
+`radiostation`에도 똑같은 방법으로 적용이 가능합니다.
 
 ## Multichannel
 MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE 정보와 Peer 정보를 알고 있어야 합니다. 
@@ -125,13 +125,14 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
   예를 들어 ```channel_manage_data.json``` 이라고 만들었다면 아래와 같이 만듭니다. 
 
 ``` channel_manage_data.json```
+
 ```json
 {
   "%CHANNEL_NAME1%": { // 1st channel name
     "score_package": "your_score_package", // The name of SCORE to execute in this channel.
     "peers": [
       {
-        "peer_target": "%IP%:%PORT%" // The list of eer targets
+        "peer_target": "%IP%:%PORT%" // The list of peer targets
       },
      ........
     ]
@@ -140,7 +141,7 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
     "score_package": "your_score_package", // The name of SCORE to execute in this channel
     "peers": [
       {
-        "peer_target": ""%IP%:%PORT%"   // The list of eer targets
+        "peer_target": ""%IP%:%PORT%"   // The list of peer targets
       },
       .......
     ]
@@ -148,7 +149,8 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
 }
 ```
 
-  TIP: ```peers```가 명확하지 않으면 없이 만들어도 됩니다.
+  TIP: ```peer_target```이 명확하지 않으면 `peer_target` 없이 빈 리스트만 만들어도 됩니다. (ex. `"peers": []`) 
+  추후에 gtool로 peer 및 채널 정보를 추가할 수 있습니다.
   
   예를 들어 kofia_0, kofia_1이라고 channel 이름을 정하고 하나는 score/code1, score/code2를 읽어서 처리하라고 하면 아래와 같이 만들면 됩니다. 
 ```json
@@ -174,6 +176,9 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
 }
 
 ```
+
+ `TIP: 만약에 한개의 SCORE만 올리려고 한다면 위의 파일에서 한 개 채널만 설정하시면 됩니다 `
+ 
   
 ### 2. 위의 파일을 읽어서 Multichannel을 동작하게 RadioStation 설정하고 실행하기. 
 
@@ -190,8 +195,8 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
  각 Parameter의 내용은 아래와 같습니다. 
   * ```CHANNEL_MANAGE_DATA_PATH```: 앞서 설정한 multichannel 설정 파일의 위치. 파일 이름까지 같이 적어야 합니다. 
   * ```ENABLE_CHANNEL_AUTH``` :  
-     - ```true``` = multichannel 설정 파일에서 정해진 peer들만 multichannel을 허용합니다. 
-     - ```false```= 임의로 peer가 추가되어도 multichannel이 동작하게 합니다. 미리 peer목록을 만들어 놓지 않을경우 이용합니다. 
+     - ```true``` : multichannel 설정 파일에서 정해진 peer들만 multichannel을 허용합니다. 
+     - ```false```: 임의로 peer가 추가되어도 multichannel이 동작하게 합니다. 미리 peer목록을 만들어 놓지 않을경우 이용합니다. 
 
 
  예를들어, 여기에서는 임의로 ```rs_config.json```이라고 하면 아래와 같이 적어야 합니다. 
@@ -207,7 +212,7 @@ MultiChannel을 이용하기 위해서는 RadioStation이 각 채널의 SCORE �
  이렇게 설정한 설정 파일을 아래 ```-o``` option으로 읽게 합니다 
  
  ```
-$ ./radiostation.py -o rs_config.json
+$ ./loopchain.py rs -o rs_config.json
 ```
 
 ### 3. Peer 설정하고 실행하기 
@@ -223,7 +228,7 @@ $ ./radiostation.py -o rs_config.json
 
 각 변수들의 뜻은 ,
  * LOOPCHAIN_DEFAULT_CHANNEL : 이 Peer에서 사용하게 될 기본 channel.
- * DEFAULT_SCORE_BRANCH : SCORE의 branch (기본이 master) 
+ * DEFAULT_SCORE_BRANCH : SCORE의 branch (기본이 master)
  
 예를 들어 아래와 같이 적어주면 됩니다.  
 
@@ -235,12 +240,50 @@ $ ./radiostation.py -o rs_config.json
     "DEFAULT_SCORE_BRANCH": "master"
 }
 ```
+
 이 파일은 아래와 같이 적어서 peer를 실행합니다. 
 ```
-$ ./peer.py -o peer_config.json
+$ ./loopchain.py peer -o peer_config.json
 ```
 
 
+## Certificate(or Publickey and PrivateKey) setup
+ 서명용 인증서를 세팅하는 방법에 대해서 설명합니다.
+ 서명용 인증서는 ecdsa secp256k를 사용하며, 인증서 없이 공개키로만으로 사용할 수도 있습니다.
+
+###  인증서 연동 방법 선택
+LOOPCHAIN 에서 인증서를 로드하는 방법은 file 에서 로드, KMS 연동이 있습니다.
+해당 방법은 option파일을 통해 세팅할 수 있습니다.
+
+```json
+{
+    "KEY_LOAD_TYPE" : 0 // 0 : FILE_LOAD 1: KMS 연동
+}
+```
+
+### 인증서 종류 선택
+ 모든 Peer가 합의를 위해 쓰는 인증서를 인증서로 할지 Public Key로 할지 선택할 수 있으며,
+ 트랜잭션의 서명을 인증서 서명 방식으로 사용할지 Public Key로 사용할지 선택할 수 있습니다.
+ option을 통해 선택할 수 있습니다.
+```json
+{
+    "PEER_CERT_AUTH" : true, // true: 합의시 인증서 사용, false: 합의시 공개키 사용
+    "TX_CERT_AUTH" : true // true: 트랜잭션 서명시 인증서 동봉, false 트랜잭션 서명시 공개키 동봉
+}
+```
+
+### 인증서 위치 설정
+ 파일로 인증서를 세팅하기 위해서는 인증서 위치를 설정하여야합니다.
+ option을 통해 설정할 수 있습니다.
+ pem형식과 der형식을 지원합니다.
+```json
+{
+    "PRIVATE_PATH" : "{LOOPCHAIN_PAHT}/resources/default_pki/private.der" // 비밀키 위치
+    "PUBLIC_PATH" : "{LOOPCHAIN_PAHT}/resources/default_pki/public.der" // 공개키 or 인증서 위치
+    "DEFAULT_PW" : "{password}"
+}
+```
+password는 옵션 파일 외에 -a {인증서 password}를 통해 사용할 수 있습니다.
 
 ## Deployment
   실제 LoopChain을 돌리는 방법으로 두가지가 있습니다.
@@ -251,7 +294,8 @@ $ ./peer.py -o peer_config.json
 #### 1. RadioStation 올리기
 
  ```
- $  ./radiostation.py  # RadioStation을 띄웁니다.
+ $ ./loopchain.py radiostation  # 혹은
+ $ ./loopchain.py rs  # 다음과 같이 Radiostation을 띄웁니다.
    ```
 
    그러면 이제 아래와 같은 Log를 보실 것입니다. 이 뜻은 현재 Local에서 9002번 Port로 다른 Peer가 접속해오기를 기다린다는 뜻입니다. 이렇게 RadioStation service를 올렸습니다.
@@ -270,12 +314,12 @@ $ ./peer.py -o peer_config.json
  새로운 Terminal을 띄워서 LoopChain folder로 갑니다. 이후 아래와 같이 입력합니다.
   ```
  $ source bin/activate  # Python 가상 환경을 띄웁니다.
- $ ./peer.py            # Peer를 띄웁니다.
+ $ ./loopchain.py peer            # Peer를 띄웁니다.
    ```
    
  하지만 configuration.json 파일에 추가로 설정값을 지정했을 경우에는 아래와 같이 옵션을 추가하여 Peer를 띄워야 합니다.
  ```
- $ ./peer.py -o loopchain/configure.json
+ $ ./loopchain.py peer -o loopchain/configure.json
  ```
   
  그러면 아래와 같은 Log를 보실 수 있습니다.
@@ -292,7 +336,7 @@ $ ./peer.py -o peer_config.json
 
 ```
 $ source bin/activate
-$ ./peer.py -p 7101
+$ ./loopchain.py peer -p 7101
 ```
  Peer는 RadioStation과 접속할 때, 한 Peer당 7100번 부터 새로운 포트를 받아서 접속합니다. RadioStation은 새로운 Peer가 접속될 때 마다, 기존에 있던 Peer들의 목록을 새로운 Peer에게 전달하고 새로운 Peer가 추가 된 것을 기존 Peer들에게 알려줍니다.
 

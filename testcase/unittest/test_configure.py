@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ class TestConfigure(unittest.TestCase):
         test_util.print_testname(self._testMethodName)
 
     def tearDown(self):
-        pass
+        util.set_log_level_debug()
 
     def test_get_configure(self):
         logging.debug(f"conf.IP_LOCAL: {conf.IP_LOCAL}")

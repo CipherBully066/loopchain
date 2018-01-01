@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ class Method:
 
 class Request(IntEnum):
     status = 1
+    is_alive = 2
     stop = -9
 
     score_load = 200
@@ -37,10 +38,12 @@ class Request(IntEnum):
     peer_get_leader = 601  # get leader peer object
     peer_complain_leader = 602  # complain leader peer is no response
     peer_reconnect_to_rs = 603  # reconnect to rs when rs restart detected.
+    peer_restart_channel = 604
 
     rs_get_configuration = 800
     rs_set_configuration = 801
     rs_send_channel_manage_info_to_rs = 802
+    rs_restart_channel = 803
 
     tx_create = 900  # create tx to inner tx service
     tx_connect_to_leader = 901  # connect to leader
@@ -78,6 +81,9 @@ class Response(IntEnum):
     fail_wrong_subscribe_info = -8
     fail_connect_to_leader = -9
     fail_add_tx_to_leader = -10
+    fail_create_tx = -11
+    fail_invalid_peer_target = -12
+    fail_not_enough_data = -13
     fail_no_peer_info_in_rs = -800
     timeout_exceed = -900
     not_treat_message_code = -999
@@ -96,7 +102,10 @@ responseCodeMap = {
     Response.fail_wrong_subscribe_info: (Response.fail_wrong_subscribe_info,    "fail wrong subscribe info"),
     Response.fail_connect_to_leader:    (Response.fail_connect_to_leader,       "fail connect to leader"),
     Response.fail_add_tx_to_leader:     (Response.fail_add_tx_to_leader,        "fail add tx to leader"),
+    Response.fail_invalid_peer_target:  (Response.fail_invalid_peer_target,     "fail invalid peer target for channel"),
+    Response.fail_not_enough_data:      (Response.fail_not_enough_data,         "fail not enough data"),
     Response.fail_no_peer_info_in_rs:   (Response.fail_no_peer_info_in_rs,      "fail no peer info in radio station"),
+    Response.fail_create_tx:            (Response.fail_create_tx,               "fail create tx to peer"),
     Response.timeout_exceed:            (Response.timeout_exceed,               "timeout exceed")
 }
 

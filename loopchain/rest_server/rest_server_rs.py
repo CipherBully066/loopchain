@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import pickle
+import setproctitle
 
 from flask import Flask, request
 from flask_restful import reqparse, Api, Resource
@@ -63,7 +64,7 @@ class ServerComponents(metaclass=SingletonMetaClass):
 
     def set_stub_port(self, port):
         self.__stub_to_rs_service = StubManager.get_stub_manager_to_server(
-            conf.IP_LOCAL + ':' + str(port), loopchain_pb2_grpc.RadioStationStub
+            conf.IP_LOCAL + ':' + str(port), loopchain_pb2_grpc.RadioStationStub, ssl_auth_type=conf.GRPC_SSL_TYPE
         )
 
     def set_argument(self):
@@ -390,5 +391,6 @@ class RestServerRS(CommonThread):
         ServerComponents().set_stub_port(self.__rs_port)
         api_port = self.__rs_port + conf.PORT_DIFF_REST_SERVICE_CONTAINER
         logging.debug("RestServerRS run... %s", str(api_port))
+        setproctitle.setproctitle(f"{setproctitle.getproctitle()} RestServerRS api_port({api_port})")
         ServerComponents().app.run(port=api_port, host='0.0.0.0',
                                    debug=False, ssl_context=ServerComponents().ssl_context)

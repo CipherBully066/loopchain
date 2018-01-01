@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding, ec
 
 import loopchain.utils as util
 import testcase.unittest.test_util as test_util
+from loopchain.configure_default import KeyLoadType
 from loopchain.peer import PeerAuthorization
 from loopchain.radiostation import CertificateAuthorization, RadioStationService
 from loopchain import configure as conf
@@ -47,7 +48,31 @@ class TestCertificateAuthorization(unittest.TestCase):
         self.__ca.load_pki(cert_path, cert_pass)
 
     def tearDown(self):
-        pass
+        """ Changed Option Reset
+        """
+        channel0 = conf.LOOPCHAIN_DEFAULT_CHANNEL
+        channel1 = conf.LOOPCHAIN_TEST_CHANNEL
+
+        conf.CHANNEL_OPTION = {
+            channel0: {
+                "load_cert": False,
+                "consensus_cert_use": False,
+                "tx_cert_use": False,
+                "key_load_type": KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+                "private_password": b'test'
+            },
+            channel1: {
+                "load_cert": False,
+                "consensus_cert_use": False,
+                "tx_cert_use": False,
+                "key_load_type": KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+                "private_password": b'test'
+            }
+        }
 
     def test_ca_certificate(self):
         """
@@ -148,28 +173,43 @@ class TestCertificateAuthorization(unittest.TestCase):
         private_key = serialization.load_pem_private_key(cert_key, pw, default_backend())
         return {'cert': cert, 'private_key': private_key}
 
+    @unittest.skip("지금 사용하지 않는 feature, RS Admin 설계를 다시하여 옵션에따라 Channel 별로 RandomTable을 리턴하도록 수정해야한다. 작업 Load가 많이 걸림")
     def test_load_pki_by_seed(self):
-        """ GIVEN random table conf.KMS = TRUE
+        """GIVEN random table conf.KMS = TRUE
         WHEN create two PeerAuthorization
         THEN create PeerAuthorization success
         THEN both PeerAuthorization sign and verify can both signature
         """
 
         # GIVEN
-        conf.ENABLE_KMS = True
+        conf.CHANNEL_OPTION = {
+                                    "kofia_certificate": {
+                                        "key_load_type": KeyLoadType.RANDOM_TABLE_DERIVATION,
+                                        "seed1": 50,
+                                        "seed2": 25
+                                    },
+                                    "kofia_fine": {
+                                        "key_load_type": KeyLoadType.RANDOM_TABLE_DERIVATION,
+                                        "seed1": 50,
+                                        "seed2": 25
+                                    }
+                                }
+
         seed = 1234
         rs_service = RadioStationService(rand_seed=seed)
         rand_table = rs_service._RadioStationService__random_table
 
         # WHEN THEN
-        peer_auth = PeerAuthorization(rand_table=rand_table)
-        peer_auth2 = PeerAuthorization(rand_table=rand_table)
+        peer_auth = PeerAuthorization("kofia_certificate")
+        peer_auth.load_from_rand_table(rand_table)
+        peer_auth2 = PeerAuthorization("kofia_fine")
+        peer_auth2.load_from_rand_table(rand_table)
 
         # THEN
         sign = peer_auth.sign_data(b'a')
         sign2 = peer_auth2.sign_data(b'a')
         # both public key must same
-        self.assertEqual(peer_auth.get_public_der(), peer_auth2.get_public_der())
+        self.assertEqual(peer_auth.peer_cert, peer_auth2.peer_cert)
         # both peer_auth can verify signature
         self.assertTrue(peer_auth.verify_data(b'a', sign2))
         self.assertTrue(peer_auth2.verify_data(b'a', sign))
@@ -179,7 +219,27 @@ class TestCertificateAuthorization(unittest.TestCase):
         peer_auth3 = PeerAuthorization(rand_table=rand_table)
         self.assertFalse(peer_auth3.verify_data(b'a', sign))
 
-        conf.ENABLE_KMS = False
+    def test_load_cert(self):
+        """GIVEN conf.PEER_CERT_AUTH = True and GIVEN Sample ECDSA Certificate
+        WHEN PeerAuthorization create using cert set
+        THEN PeerAuthorization can create by cert
+        """
+        # GIVEN
+        channel_name = "cert_channel"
+        conf.CHANNEL_OPTION = {
+            channel_name: {
+                "load_cert": True,
+                "consensus_cert_use": False,
+                "tx_cert_use": False,
+                "key_load_type": KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_certs/cert.pem'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_certs/key.pem'),
+                "private_password": None
+            }
+        }
+
+        # WHEN THEN
+        peer_auth = PeerAuthorization(channel_name)
 
 
 if __name__ == '__main__':

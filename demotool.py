@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import timeit
 from sys import platform
 
 import coloredlogs
-import grpc
 import os
 import requests
 
@@ -33,6 +32,7 @@ from loopchain.protos import message_code
 sys.path.append("loopchain/protos")
 from loopchain.protos import loopchain_pb2, loopchain_pb2_grpc
 from loopchain.radiostation import AdminManager
+from loopchain.tools.grpc_helper import GRPCHelper
 
 
 # Main definition - constants
@@ -251,32 +251,32 @@ def show_git_branch(option = ""):
 
 def menu3_1():
     show_git_branch()
-    print("Add New Feature Num (prefix: LOOP-00)")
+    print("Add New Feature Num (prefix: ENGINE-00)")
     choice = input(" >>  ")
     if choice != "":
-        command = "git flow feature start LOOP-" + str(choice)
+        command = "git flow feature start ENGINE-" + str(choice)
         os.system(command)
-        command = "git push --set-upstream origin feature/LOOP-" + str(choice)
+        command = "git push --set-upstream origin feature/ENGINE-" + str(choice)
         os.system(command)
     menu3()
 
 
 def menu3_2():
     show_git_branch()
-    print("Choose branch number you want to finish (prefix: LOOP-00)")
+    print("Choose branch number you want to finish (prefix: ENGINE-00)")
     choice = input(" >>  ")
     if choice != "":
-        command = "git flow feature finish LOOP-" + str(choice)
+        command = "git flow feature finish ENGINE-" + str(choice)
         os.system(command)
     menu3()
 
 
 def menu3_3():
     show_git_branch("-a")
-    print("Choose branch number you want to remove (prefix: LOOP-00)")
+    print("Choose branch number you want to remove (prefix: ENGINE-00)")
     choice = input(" >>  ")
     if choice != "":
-        command = "git branch -d -r origin/feature/LOOP-" + str(choice)
+        command = "git branch -d -r origin/feature/ENGINE-" + str(choice)
         os.system(command)
     menu3()
 
@@ -555,9 +555,11 @@ def menu4_1(params=None):
         test_globals["channel_name"] = admin_manager.get_channel_list()[0]
 
     print("your input: " + choice)
-    channel = grpc.insecure_channel(choice)
+    # TODO If channel lost by garbage collect, Stub that made with this channel also lost.
+    channel = GRPCHelper().create_client_channel(choice)
     peer_stub = loopchain_pb2_grpc.PeerServiceStub(channel)
-    response = peer_stub.GetStatus(loopchain_pb2.StatusRequest(request="hello"), conf.GRPC_TIMEOUT)
+    response = peer_stub.GetStatus(loopchain_pb2.StatusRequest(
+        request="hello", channel=test_globals["channel_name"]), conf.GRPC_TIMEOUT)
     print("Peer Status: " + str(response))
     menu4(peer_stub)
 

@@ -13,12 +13,13 @@
 # limitations under the License.
 """ A module for configuration"""
 
-import re
-import json
-import loopchain
 import importlib
+import json
+import re
 
+import loopchain
 from loopchain.configure_default import *
+
 try:
     from loopchain.configure_user import *
     ENABLE_USER_CONFIG = True
@@ -171,7 +172,9 @@ def get_configuration(configure_name):
 
 def set_configuration(configure_name, configure_value):
     if configure_name in globals():
+        # print(f"!!!!!!!!!!!!!!!!!!!!!")
         globals()[configure_name] = configure_value
+        # print(f"{globals()[configure_name]} vs {configure_value}")
         return True
     else:
         return False
@@ -191,3 +194,4 @@ def get_all_configurations():
 
 
 Configure()
+

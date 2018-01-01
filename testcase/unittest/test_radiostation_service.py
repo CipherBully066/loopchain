@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ util.set_log_level_debug()
 
 class TestRadioStationService(unittest.TestCase):
 
+    @unittest.skip("After Random Table Multi channelize ")
     def test_random_generate(self):
         """GIVEN Random Seed and conf.RANDOM_NUM, conf.KMS = True
         WHEN 2 RadioStationService init params seed
@@ -36,9 +37,7 @@ class TestRadioStationService(unittest.TestCase):
         # GIVEN
         seed = 123456
 
-        # default must be False
-        self.assertFalse(conf.ENABLE_KMS)
-        conf.ENABLE_KMS = True
+        conf.KEY_LOAD_TYPE = conf.KeyLoadType.RANDOM_TABLE_DERIVATION
 
         # WHEN THEN
         random_table = TestRadioStationService.create_rand_table(seed)
@@ -50,7 +49,7 @@ class TestRadioStationService(unittest.TestCase):
             random_data: int = random_table[i]
             self.assertEqual(random_data, random_table2[i])
 
-        conf.ENABLE_KMS = False
+        conf.KEY_LOAD_TYPE = conf.KeyLoadType.FILE_LOAD
 
     @staticmethod
     def create_rand_table(seed) -> list:

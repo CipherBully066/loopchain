@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,13 +36,13 @@ class TestBlock(unittest.TestCase):
 
     def setUp(self):
         test_util.print_testname(self._testMethodName)
-        self.__peer_auth = test_util.create_peer_auth()
+        self.__peer_auth = test_util.create_default_peer_auth()
 
         peer_service_mock = Mock()
         peer_service_mock.peer_manager = Mock()
         mock_info = PeerInfo(peer_id=self.__peer_id, group_id='a', target="192.0.0.1:1234", status=PeerStatus.unknown,
-                             cert=self.__peer_auth.get_public_der(), order=0)
-        mock_peer_object = PeerObject(mock_info)
+                             cert=self.__peer_auth.peer_cert, order=0)
+        mock_peer_object = PeerObject(list(conf.CHANNEL_OPTION)[0], mock_info)
 
         def get_leader_object():
             return mock_peer_object
@@ -127,7 +127,7 @@ class TestBlock(unittest.TestCase):
         머클트리 검증
         """
         # 블럭을 검증 - 모든 머클트리의 내용 검증
-        block = self.__generate_block()
+        block = self.__generate_block_data()
         mk_result = True
         for tx in block.confirmed_transaction_list:
             # FIND tx index

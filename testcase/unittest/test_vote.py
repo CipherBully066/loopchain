@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ from loopchain.peer import Vote
 from loopchain.baseservice import PeerManager, PeerInfo
 from loopchain.protos import loopchain_pb2
 from loopchain import configure as conf
+from loopchain.tools.signature_helper import PublicVerifier
 
 util.set_log_level_debug()
 
@@ -35,7 +36,7 @@ class TestVote(unittest.TestCase):
     def setUp(self):
         test_util.print_testname(self._testMethodName)
         if self.__cert is None:
-            with open(conf.PUBLIC_PATH, "rb") as der:
+            with open(conf.CHANNEL_OPTION[list(conf.CHANNEL_OPTION)[0]][PublicVerifier.PUBLIC_PATH], "rb") as der:
                 cert_byte = der.read()
                 self.__cert = cert_byte
 

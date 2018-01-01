@@ -40,15 +40,15 @@ git rev-parse HEAD > LOOPCHAIN_VERSION
 echo "REMOVE PYCACHE"
 find .. | grep -E "(__pycache__|\.pyc|\.pyo$)" | xargs rm -rf
 
-if [[ ${LOG} = log || "$(docker images -q loopchain-fluentd:latest > /dev/null)" == "" ]]; then
+if [[ ${LOG} = log || "$(docker images -q loopchain-fluentd:latest 2> /dev/null)" == "" ]]; then
     # build fluentd for local operation.
-    build_local_fluentd ${ARG}
+    build_local_fluentd
 fi
 
-# Generate key for basic testing.
-cd ..
-python3 create_sign_pki.py
-cd deploy
+# - release : Release version (Add 'latest' tag for this docker image.)
+if [ ${ARG} = release ]; then
+    build_docker latest
+    exit 0
+fi
 
-# Generate docker images
 build_docker ${ARG}

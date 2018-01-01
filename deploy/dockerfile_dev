@@ -1,0 +1,17 @@
+# DOCKERFILE for Dev.
+
+FROM loop-base:latest
+MAINTAINER TheLoop Dev Team <dev@theloop.co.kr>
+
+# add Deploy Key
+# RUN mkdir /root/.ssh/
+ADD resources/loopchain_deploy /root/.ssh/id_rsa
+RUN chmod 0600 /root/.ssh/id_rsa
+
+# Create known_hosts
+RUN touch /root/.ssh/known_hosts
+RUN ssh-keyscan repo.theloop.co.kr >> /root/.ssh/known_hosts
+
+# install requirements
+ADD requirements.txt .
+RUN pip3 install -r requirements.txt
