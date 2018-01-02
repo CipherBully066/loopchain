@@ -12,7 +12,7 @@ function launch_docker_in_local(){
     docker run -d ${DOCKER_LOGDRIVE} --name ${PEER_NAME} --env-file ./env_${DOCKER_TAG}.list \
         --link radio_station:radio_station -p ${PORT}:${PORT} -p ${API_PORT}:${API_PORT} \
         -e USE_GUNICORN_HA_SERVER=True \
-        looppeer:${DOCKER_TAG} python3 loopchain.py peer -c ${DEPLOY_SCORE} -r radio_station:7102 -d -p ${PORT} || exit -1
+        looppeer:${DOCKER_TAG} python3 peer.py  -r radio_station:7102 -d -p ${PORT} || exit -1
 
 }
 
@@ -52,18 +52,17 @@ sleep 10
 
 # Launch RadioStation.
 echo "RUN RADIO STATION"
-docker run -d ${DOCKER_LOGDRIVE} --name radio_station -p 7102:7102 -p 9002:9002 looprs:${TAG} python3 loopchain.py rs -d
+docker run -d ${DOCKER_LOGDRIVE} --name radio_station -p 7102:7102 -p 9002:9002 looprs:${TAG} python3 radiostation.py -d
 
 
 # Launch Peer 0. Port = 7100
-launch_docker_in_local 7100 peer0  ${TAG}   ${DEPLOY_SCORE}
+launch_docker_in_local 7100 peer0  ${TAG}
 
 # Launch Peer 1. Port = 7200
-launch_docker_in_local 7200 peer1  ${TAG}   ${DEPLOY_SCORE}
+launch_docker_in_local 7200 peer1  ${TAG}
 
 # Launch Peer 2. Port = 7300
-launch_docker_in_local 7300 peer2  ${TAG}   ${DEPLOY_SCORE}
+launch_docker_in_local 7300 peer2  ${TAG}
 
 # Launch Peer 3. Port = 7400
-launch_docker_in_local 7400 peer3  ${TAG}   ${DEPLOY_SCORE}
-
+launch_docker_in_local 7400 peer3  ${TAG}
