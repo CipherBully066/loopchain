@@ -9,6 +9,9 @@ python3 -m grpc.tools.protoc -I'./protos' --python_out='./protos' --grpc_python_
 cd ..
 echo ""
 
+echo "Generate default PKI key for testing."
+python3 create_sign_pki.py
+
 
 echo "Generating grpc test ssl certificate...."
 
