@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -135,6 +135,8 @@ class CandidateBlocks:
             util.apm_event(self.__peer_id, {
                 'event_type': 'NoExistBlock',
                 'peer_id': self.__peer_id,
+                'peer_name': conf.PEER_NAME,
+                'channel_name': self.__channel_name,
                 'data': {
                     'message': 'No Exist block in candidate blocks by hash',
                     'block_hash': block_hash}})
@@ -150,6 +152,8 @@ class CandidateBlocks:
                 util.apm_event(self.__peer_id, {
                     'event_type': 'InvalidatedBlock',
                     'peer_id': self.__peer_id,
+                    'peer_name': conf.PEER_NAME,
+                    'channel_name': self.__channel_name,
                     'data': {
                         'message': 'This block fail to validate',
                         'block_hash': candidate_block.block_hash}})
@@ -159,6 +163,8 @@ class CandidateBlocks:
                 util.apm_event(self.__peer_id, {
                     'event_type': 'NotCompleteValidation',
                     'peer_id': self.__peer_id,
+                    'peer_name': conf.PEER_NAME,
+                    'channel_name': self.__channel_name,
                     'data': {
                         'message': 'There is Not Complete Validation.',
                         'block_hash': candidate_block.block_hash}})

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ from enum import IntEnum
 from loopchain import configure as conf
 from loopchain.baseservice import StubManager
 from loopchain.protos import loopchain_pb2_grpc
-from loopchain.tools import PublicVerifier
+from loopchain.tools.signature_helper import PublicVerifier
 
 
 class PeerStatus(IntEnum):
@@ -43,6 +43,7 @@ class PeerInfo:
         :param target: grpc target info default ""
         :param status: connect status if db loaded peer to PeerStatus.unknown default ""
         :param cert: peer's signature cert default b""
+        :param order:
         :return:
         """
         self.__peer_id = peer_id
@@ -53,7 +54,7 @@ class PeerInfo:
         self.__status_update_time = datetime.datetime.now()
         self.__status = status
 
-        self.__cert: str = cert
+        self.__cert: bytes = cert
 
     @property
     def peer_id(self) -> str:
@@ -80,7 +81,7 @@ class PeerInfo:
         self.__target = target
 
     @property
-    def cert(self):
+    def cert(self) -> bytes:
         return self.__cert
 
     @cert.setter
@@ -105,25 +106,36 @@ class PeerInfo:
 class PeerObject:
     """Peer object has PeerInfo and live data"""
 
-    def __init__(self, peer_info: PeerInfo):
-        """set peer info and create live data"""
+    def __init__(self, channel: str, peer_info: PeerInfo):
+        """set peer info and create live data
+
+        :param channel: peer channel name
+        :param peer_info: peer info
+        """
         self.__peer_info: PeerInfo = peer_info
         self.__stub_manager: StubManager = None
         self.__cert_verifier: PublicVerifier = None
         self.__no_response_count = 0
+        self.__channel = channel
 
         self.__create_live_data()
 
     def __create_live_data(self):
-        """create live data that can't serialized"""
+        """create live data that can't serialized
+
+        :param channel: channel_name
+        """
         # TODO live data 생성 실패 때 정책 설정 필요
         try:
-            self.__stub_manager = StubManager(self.__peer_info.target, loopchain_pb2_grpc.PeerServiceStub)
+            self.__stub_manager = StubManager(self.__peer_info.target,
+                                              loopchain_pb2_grpc.PeerServiceStub,
+                                              conf.GRPC_SSL_TYPE)
         except Exception as e:
             logging.exception(f"Create Peer create stub_manager fail target : {self.__peer_info.target} \n"
                               f"exception : {e}")
         try:
-            self.__cert_verifier = PublicVerifier(self.peer_info.cert)
+            self.__cert_verifier = PublicVerifier(self.__channel)
+            self.__cert_verifier.load_public_for_tx_verify(self.peer_info.cert)
         except Exception as e:
             logging.exception(f"create cert verifier error : {self.__peer_info.cert} \n"
                               f"exception {e}")
@@ -143,6 +155,10 @@ class PeerObject:
     @property
     def no_response_count(self):
         return self.__no_response_count
+
+    @property
+    def channel(self):
+        return self.__channel
 
     def no_response_count_up(self):
         self.__no_response_count += 1

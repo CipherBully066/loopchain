@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,9 +13,8 @@
 # limitations under the License.
 """base class for multi thread """
 
-import threading
 import logging
-
+import threading
 from abc import abstractmethod
 
 
@@ -25,7 +24,7 @@ class CommonThread:
     """
 
     def __init__(self):
-        # logging.debug("CommonThread Init")
+        logging.debug("common_thread:CommonThread init")
         self.__is_run = False
         self.__run_thread = None
 

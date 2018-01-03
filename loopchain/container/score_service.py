@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,26 +13,32 @@
 # limitations under the License.
 """A class for Score service"""
 
-import logging
-import grpc
 import json
+import logging
 import pickle
 
 import loopchain.utils as util
-from loopchain.baseservice import ObjectManager, PeerScore
+from loopchain import configure as conf
+from loopchain.baseservice import ScoreResponse, ObjectManager, PeerScore, StubManager
 from loopchain.blockchain import Transaction, ScoreInvokeError
 from loopchain.container import Container
 from loopchain.protos import loopchain_pb2, loopchain_pb2_grpc, message_code
-from loopchain import configure as conf
-from loopchain.scoreservice import ScoreResponse
+from loopchain.tools.grpc_helper import GRPCHelper
 
 
 class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
 
-    def __init__(self, port):
-        Container.__init__(self, port)
+    def __init__(self, port, channel_name, start_param_set: dict):
+        process_name = f"ScoreService {channel_name}"
+        Container.__init__(self,
+                           port=port,
+                           process_name=process_name,
+                           channel=channel_name,
+                           start_param_set=start_param_set)
+
         self.__handler_map = {
             message_code.Request.status: self.__handler_status,
+            message_code.Request.is_alive: self.__handler_is_alive,
             message_code.Request.stop: self.__handler_stop,
             message_code.Request.score_load: self.__handler_score_load,
             message_code.Request.score_invoke: self.__handler_score_invoke,
@@ -42,13 +48,14 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
         }
         self.__score = None
         self.__peer_id = None
+        self.__channel_name = channel_name
         self.__stub_to_peer_service = None
         ObjectManager().score_service = self
         self.start()
 
     def get_last_block_hash(self):
-        response = self.__stub_to_peer_service.GetLastBlockHash(
-            loopchain_pb2.CommonRequest(request=""), conf.GRPC_TIMEOUT)
+        response = self.__stub_to_peer_service.call(
+            "GetLastBlockHash", loopchain_pb2.CommonRequest(request=""), conf.GRPC_TIMEOUT)
         return str(response.block_hash)
 
     def get_block_by_hash(self, block_hash="",
@@ -65,7 +72,8 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
                   block_data_filter="prev_block_hash, height, block_hash",
                   tx_data_filter="tx_hash"):
 
-        response = self.__stub_to_peer_service.GetBlock(
+        response = self.__stub_to_peer_service.call(
+            "GetBlock",
             loopchain_pb2.GetBlockRequest(
                 block_hash=block_hash,
                 block_height=block_height,
@@ -80,8 +88,8 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
 
         :return: peer의 정보
         """
-        response = self.__stub_to_peer_service.GetStatus(
-            loopchain_pb2.StatusRequest(request="ScoreService.get_peer_status"), conf.GRPC_TIMEOUT)
+        response = self.__stub_to_peer_service.call(
+            "GetStatus", loopchain_pb2.StatusRequest(request="ScoreService.get_peer_status"), conf.GRPC_TIMEOUT)
         logging.debug("GET PEER STATUS IN Score Service %s", response)
         return response
 
@@ -96,7 +104,9 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
         :return: 
         """
         logging.debug("__handler_connect %s", request.message)
-        self.__stub_to_peer_service = loopchain_pb2_grpc.PeerServiceStub(grpc.insecure_channel(request.message))
+
+        self.__stub_to_peer_service = StubManager(
+            request.message, loopchain_pb2_grpc.PeerServiceStub, ssl_auth_type=conf.SSLAuthType.none)
         return_code = (message_code.Response.success, message_code.Response.fail)[self.__stub_to_peer_service is None]
         return loopchain_pb2.Message(code=return_code)
 
@@ -126,6 +136,10 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
         logging.debug("ScoreService __handler_status %s : %s", request.message, status_json)
 
         return loopchain_pb2.Message(code=message_code.Response.success, meta=status_json)
+
+    def __handler_is_alive(self, request, context):
+        # util.logger.spam(f"score_service:__handler_is_alive")
+        return loopchain_pb2.Message(code=message_code.Response.success)
 
     def __handler_stop(self, request, context):
         logging.debug("ScoreService handler stop...")
@@ -196,12 +210,19 @@ class ScoreService(Container, loopchain_pb2_grpc.ContainerServicer):
                         results[tx_hash][error_message_key] = str(e)
                         continue
 
-            # logging.debug('results : %s', str(results))
-            util.apm_event(self.__peer_id, {
-                'event_type': 'InvokeResult',
-                'peer_id': self.__peer_id,
-                'data': {'invoke_result': invoke_result}})
+                    peer_id = transaction.meta[Transaction.PEER_ID_KEY]
 
+                    util.apm_event(self.__peer_id, {
+                        'event_type': 'ScoreInvoke',
+                        'peer_id': self.__peer_id,
+                        'peer_name': conf.PEER_NAME,
+                        'channel_name': self.__channel_name,
+                        'data': {
+                            'request_peer_id': peer_id,
+                            'tx_data': transaction.get_data_string(),
+                            'invoke_result': invoke_result}})
+
+            # logging.debug('results : %s', str(results))
 
             meta = json.dumps(results)
             return loopchain_pb2.Message(code=message_code.Response.success, meta=meta)

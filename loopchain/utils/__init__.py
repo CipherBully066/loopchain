@@ -20,6 +20,7 @@ import leveldb
 import logging
 import os.path as osp
 import re
+import signal
 import socket
 import time
 import timeit
@@ -29,7 +30,6 @@ from pathlib import Path
 from subprocess import PIPE, Popen, TimeoutExpired
 
 import coloredlogs
-import grpc
 import os
 import verboselogs
 from fluent import event
@@ -37,19 +37,12 @@ from fluent import sender
 
 from loopchain import configure as conf
 from loopchain.protos import loopchain_pb2, message_code
+from loopchain.tools.grpc_helper import GRPCHelper
 
 # for verbose logs
 logger = verboselogs.VerboseLogger("dev")
 apm_event = None
-
-
-def set_log_level():
-    logging.basicConfig(handlers=[logging.FileHandler(conf.LOG_FILE_PATH, 'w', 'utf-8'), logging.StreamHandler()],
-                        format=conf.LOG_FORMAT, level=conf.LOG_LEVEL)
-
-    # monitor setting
-    if conf.MONITOR_LOG:
-        sender.setup('loopchain', host=conf.MONITOR_LOG_HOST, port=conf.MONITOR_LOG_PORT)
+logger_reset = None
 
 
 def set_colored_log_level():
@@ -59,6 +52,30 @@ def set_colored_log_level():
     logger = verboselogs.VerboseLogger("dev")
 
 
+def set_log_level(peer_id=""):
+    global logger_reset
+    if peer_id != "":
+        log_format = conf.LOG_FORMAT.replace("[PEER_ID]", peer_id)
+        log_format_debug = conf.LOG_FORMAT_DEBUG.replace("[PEER_ID]", peer_id)
+
+        conf.set_configuration("LOG_FORMAT", log_format)
+        conf.set_configuration("LOG_FORMAT_DEBUG", log_format_debug)
+
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    logging.basicConfig(handlers=[logging.FileHandler(conf.LOG_FILE_PATH, 'w', 'utf-8'), logging.StreamHandler()],
+                        format=conf.LOG_FORMAT, level=conf.LOG_LEVEL)
+
+    # This code is for adding peer_id to all log, and '-d' option loses influence about log by it.
+    if logger_reset is not None and logger_reset.__name__ != "set_log_level":
+        set_colored_log_level()
+
+    # monitor setting
+    if conf.MONITOR_LOG:
+        sender.setup('loopchain', host=conf.MONITOR_LOG_HOST, port=conf.MONITOR_LOG_PORT)
+
+
 # for logger color reset during test
 logger_reset = set_log_level
 
@@ -66,7 +83,7 @@ logger_reset = set_log_level
 def exit_and_msg(msg):
     exit_msg = "Service Stop by " + msg
     logging.error(exit_msg)
-    exit(exit_msg)
+    os.killpg(0, signal.SIGKILL)
 
 
 def load_user_score(path):
@@ -114,17 +131,8 @@ def set_log_color_set(is_leader=False):
             'warning': {'color': 'yellow'}}
 
 
-def create_default_pki():
-    # when first run of loopchain
-    # we made own pki key for loopchain security
-    my_file = Path("resources/default_pki/private.der")
-    if not my_file.is_file():
-        os.system("python3 create_sign_pki.py")
-
-
 def set_log_level_debug():
     global logger_reset
-    create_default_pki()
     set_log_color_set()
     set_colored_log_level()
     logger_reset = set_colored_log_level
@@ -140,7 +148,8 @@ def change_log_color_set(is_leader=False):
     logger_reset()
 
 
-def get_stub_to_server(target, stub_class, time_out_seconds=None, is_check_status=True):
+def get_stub_to_server(target, stub_class, time_out_seconds=None, is_check_status=True,
+                       ssl_auth_type: conf.SSLAuthType=conf.SSLAuthType.none):
     """gRPC connection to server
 
     :return: stub to server
@@ -148,13 +157,14 @@ def get_stub_to_server(target, stub_class, time_out_seconds=None, is_check_statu
     if time_out_seconds is None:
         time_out_seconds = conf.CONNECTION_RETRY_TIMEOUT
     stub = None
+    channel = None
     start_time = timeit.default_timer()
     duration = timeit.default_timer() - start_time
 
     while stub is None and duration < time_out_seconds:
         try:
             logging.debug("(util) get stub to server target: " + str(target))
-            channel = grpc.insecure_channel(target)
+            channel = GRPCHelper().create_client_channel(target, ssl_auth_type, conf.GRPC_SSL_KEY_LOAD_TYPE)
             stub = stub_class(channel)
             if is_check_status:
                 stub.Request(loopchain_pb2.Message(code=message_code.Request.status), conf.GRPC_TIMEOUT)
@@ -168,7 +178,7 @@ def get_stub_to_server(target, stub_class, time_out_seconds=None, is_check_statu
             duration = timeit.default_timer() - start_time
             stub = None
 
-    return stub
+    return stub, channel
 
 
 def request_server_in_time(stub_method, message, time_out_seconds=None):
@@ -247,7 +257,14 @@ def get_private_ip3():
 
 
 def get_private_ip2():
-    return [l for l in ([ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith("127.")][:1], [[(s.connect(('8.8.8.8', 53)), s.getsockname()[0], s.close()) for s in [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]][0][1]]) if l][0][0]
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        result = s.getsockname()[0]
+        s.close()
+    except Exception as e:
+        result = "127.0.0.1"
+    return result
 
 
 def check_is_private_ip(ip):
@@ -399,7 +416,7 @@ def parse_target_list(targets: str) -> list:
     return target_list
 
 
-def init_level_db(level_db_identity):
+def init_level_db(level_db_identity, allow_rename_path=True):
     """init Level Db
 
     :param level_db_identity: identity for leveldb
@@ -416,7 +433,8 @@ def init_level_db(level_db_identity):
         try:
             level_db = leveldb.LevelDB(db_path, create_if_missing=True)
         except leveldb.LevelDBError:
-            db_path = db_default_path + str(retry_count)
+            if allow_rename_path:
+                db_path = db_default_path + str(retry_count)
         retry_count += 1
 
     if level_db is None:

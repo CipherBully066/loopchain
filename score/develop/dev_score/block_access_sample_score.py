@@ -10,7 +10,7 @@ from loopchain.blockchain import ScoreBase
 class UserScore(ScoreBase):
     """ peer service, score service 연동 샘플 스코어
     마지막 블럭 해시를 구한 다음 전체 블럭을 조회해서 순회하는 샘플 코드
-    run this: ./peer.py -d -p 7100 -c develop/dev_score
+    run this: ./loopchain.py peer -d -p 7100 -c develop/dev_score
     
     """
     def invoke(self, transaction, block):

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -81,7 +81,9 @@ class ConsensusLFT(ConsensusBase):
                 # 검증 받을 블록의 hash 를 생성하고 후보로 등록한다.
                 logging.debug("add unconfirmed block to candidate blocks")
                 self._block.generate_block(self._candidate_blocks.get_last_block(self._blockchain))
-                self._block.sign(ObjectManager().peer_service.auth)
+                self._block.sign(
+                    ObjectManager().peer_service.channel_manager.get_peer_auth(self._channel_name)
+                )
                 self._candidate_blocks.add_unconfirmed_block(self._block)
 
                 # logging.warning("blockchain.last_block_hash: " + self._blockchain.last_block.block_hash)

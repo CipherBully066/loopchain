@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 # limitations under the License.
 """package for common objects"""
 
+from .score_code import *
 from .stub_manager import *
 from .object_manager import *
 from .peer_object import *
@@ -20,6 +21,8 @@ from .peer_manager import *
 from .common_thread import *
 from .common_process import *
 from .manage_process import *
+from .monitor import *
+from .monitor_adapter import *
 from .broadcast_process import *
 from .peer_score import *
 from .timer_service import *

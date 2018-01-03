@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -71,27 +71,29 @@ class ConsensusBase(metaclass=ABCMeta):
         tx_count = 0
         peer_manager_block = None
         while not self._txQueue.empty():
+            logging.debug("consensus_base txQueue not empty")
             # 수집된 tx 가 있으면 Block 에 집어 넣는다.
             tx_unloaded = self._txQueue.get()
             tx = pickle.loads(tx_unloaded)
 
             if isinstance(tx, Transaction):
-                # logging.debug("txQueue get tx: " + tx.get_tx_hash())
+                logging.debug("consensus_base txQueue get tx: " + tx.get_tx_hash())
                 tx_count += 1
             else:
                 logging.error("Load Transaction Error!")
                 continue
 
             if tx.type is TransactionType.peer_list:
+                logging.debug("consensus_base Get tx type : peer_list")
                 peer_manager_block = Block(channel_name=self._channel_name)
                 peer_manager_block.block_type = BlockType.peer_list
                 peer_manager_block.peer_manager = tx.get_data()
                 break
             elif self._block is None:
-                logging.error("Leader Can't Add tx...")
+                logging.error("consensus_base Leader Can't Add tx...")
             else:
                 tx_confirmed = self._block.put_transaction(tx)
-                # logging.debug("put transaction to block: " + str(tx_confirmed))
+                logging.debug("consensus_base Put transaction to block: " + str(tx_confirmed))
 
             # 블럭의 담기는 트랜잭션의 최대 갯수, 메시지 크기를 계속 dump 로 비교하는 것은 성능에 부담이 되므로 tx 추가시에는 갯수로만 방지한다.
             if tx_count >= conf.MAX_BLOCK_TX_NUM:
@@ -99,11 +101,13 @@ class ConsensusBase(metaclass=ABCMeta):
 
         if self._block is not None and len(self._block.confirmed_transaction_list) > 0:
             # 최종 블럭 생성뒤 gRPC 메시지 사이즈를 넘게 되면 블럭을 나누어서 다시 생성하게 한다.
+            logging.warning(f"consensus_base:_makeup_block there is over size block, this block will divide.")
             block_dump = pickle.dumps(self._block)
             block_dump_size = len(block_dump)
 
             if block_dump_size > (conf.MAX_BLOCK_KBYTES * 1024):
                 # TODO block 나누기
+                logging.debug("consensus_base Block Size Over")
                 divided_block = Block(channel_name=self._channel_name, is_divided_block=True)
                 do_divide = False
 
@@ -136,6 +140,9 @@ class ConsensusBase(metaclass=ABCMeta):
                         do_divide = False
 
         if peer_manager_block is not None:
+            logging.debug("consensus_base:_makeup_block make peer_list block and sign it.")
             peer_manager_block.generate_block(self._candidate_blocks.get_last_block(self._blockchain))
-            peer_manager_block.sign(ObjectManager().peer_service.auth)
+            peer_manager_block.sign(
+                ObjectManager().peer_service.channel_manager.get_peer_auth(self._channel_name)
+            )
 

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -155,7 +155,7 @@ class PeerManager:
             :param item: (peer_id, PeerInfo)
             :return: peer_id, PeerObject)
             """
-            return item[0], PeerObject(item[1])
+            return item[0], PeerObject(self.__channel_name, item[1])
         # PeerInfo List To PeerObjectList
         # map(func, [a, b] ) -> [func(a), func(b)]
         # dict([(a, b), (a1,b1)]) -> {a: b, a1, b1}
@@ -189,7 +189,7 @@ class PeerManager:
         self.__init_peer_group(peer_info.group_id)
 
         util.logger.spam(f"peer_manager::add_peer try make PeerObject")
-        peer = PeerObject(peer_info)
+        peer = PeerObject(self.__channel_name, peer_info)
 
         # add_peer logic must be atomic
         self.__add_peer_lock.acquire()
@@ -267,7 +267,7 @@ class PeerManager:
             leader_peer = self.get_peer(leader_peer_id, search_group)
             return leader_peer
         except KeyError as e:
-            logging.exception(e)
+            logging.exception(f"peer_manager:get_leader_peer exception({e})")
             if is_complain_to_rs:
                 return self.leader_complain_to_rs(search_group)
             else:
@@ -277,7 +277,7 @@ class PeerManager:
                     return None
 
     def get_leader_id(self, search_group) -> str:
-        """ get leader's peer id
+        """get leader's peer id
 
         :param search_group:
         :return: leader peer_id
@@ -285,11 +285,15 @@ class PeerManager:
         leader_peer_order = self.peer_leader[search_group]
         logging.debug(f"peer_manager:get_leader_id leader peer order {leader_peer_order}")
         # util.logger.spam(f"peer_manager:get_leader_id peer_orger_list({self.peer_order_list})")
-        leader_peer_id = self.peer_order_list[search_group][leader_peer_order]
+        try:
+            leader_peer_id = self.peer_order_list[search_group][leader_peer_order]
+        except Exception as e:
+            raise e
+
         return leader_peer_id
 
     def get_leader_object(self) -> PeerObject:
-        """ get leader peer object
+        """get leader peer object
 
         :param search_group:
         :return: leader peer object
@@ -406,7 +410,7 @@ class PeerManager:
             next_peer_id = self.peer_order_list[group_id][order_list[next_order_position]]
             logging.debug("peer_manager:__get_next_peer next_leader_peer_id: " + str(next_peer_id))
             return self.peer_list[group_id][next_peer_id]
-        except IndexError as e:
+        except (IndexError, KeyError) as e:
             logging.warning(f"peer_manager:__get_next_peer there is no next peer ({e})")
             util.logger.spam(f"peer_manager:__get_next_peer "
                              f"\npeer_id({peer.peer_id}), group_id({group_id}), "
@@ -434,7 +438,7 @@ class PeerManager:
         next_leader_peer = self.__get_next_peer(self.get_leader_peer(group_id), group_id)
 
         while try_count < max_retry:
-            stub_manager = StubManager(next_leader_peer.target, loopchain_pb2_grpc.PeerServiceStub)
+            stub_manager = StubManager(next_leader_peer.target, loopchain_pb2_grpc.PeerServiceStub, conf.GRPC_SSL_TYPE)
             try:
                 try_count += 1
                 response = stub_manager.call("GetStatus", loopchain_pb2.CommonRequest(request=""))
@@ -492,12 +496,12 @@ class PeerManager:
                     announce_message.message = message_code.get_response_msg(
                         message_code.Response.fail_no_peer_info_in_rs)
                     ObjectManager().peer_service.connect_to_radiostation(channel=self.__channel_name, is_reconnect=True)
-                    ObjectManager().peer_service.common_service.broadcast(
+                    ObjectManager().peer_service.channel_manager.broadcast(
+                        self.__channel_name,
                         "Request",
                         loopchain_pb2.Message(
                             code=message_code.Request.peer_reconnect_to_rs,
-                            channel=self.__channel_name)
-                    )
+                            channel=self.__channel_name))
         except Exception as e:
             # logging.debug("in RS there is no peer_service....")
             is_rs = True
@@ -515,7 +519,6 @@ class PeerManager:
                     logging.warning("gRPC Exception: " + str(e))
                     logging.debug("No response target: " + str(peer_each.target))
 
-
     def announce_new_peer(self, peer_request):
         logging.debug("announce_new_peer")
         for peer_id in list(self.peer_list[conf.ALL_GROUP_ID]):
@@ -527,6 +530,25 @@ class PeerManager:
             except Exception as e:
                 logging.warning("gRPC Exception: " + str(e))
                 logging.debug("No response target: " + str(peer_each.target))
+
+    # TODO UnSubscribe 한 peer 도 rs heartbeat 을 통해서 제거하므로 현재 아래의 코드는 사용하지 않는다.
+    # def announce_delete_peer(self, peer_request):
+    #     logging.debug("announce_delete_peer")
+    #
+    #     message = loopchain_pb2.PeerID(
+    #         peer_id=peer_request.peer_id,
+    #         channel=peer_request.channel,
+    #         group_id=peer_request.group_id)
+    #
+    #     for peer_id in list(self.peer_list[conf.ALL_GROUP_ID]):
+    #         peer_each = self.peer_list[conf.ALL_GROUP_ID][peer_id]
+    #         stub_manager = self.get_peer_stub_manager(peer_each, peer_each.group_id)
+    #         try:
+    #             if peer_each.target != peer_request.peer_target:
+    #                 stub_manager.call("AnnounceDeletePeer", message, is_stub_reuse=True)
+    #         except Exception as e:
+    #             logging.warning("gRPC Exception: " + str(e))
+    #             logging.debug("No response target: " + str(peer_each.target))
 
     def complain_leader(self, group_id=None, is_announce=False):
         """When current leader is offline, Find last height alive peer and set as a new leader.
@@ -592,6 +614,7 @@ class PeerManager:
         if group_id is None:
             group_id = conf.ALL_GROUP_ID
         delete_peer_list = []
+        delete_doubt_peers = []
         alive_peer_last = None
         check_leader_peer_count = 0
         for peer_id in list(self.__peer_object_list[group_id]):
@@ -603,7 +626,8 @@ class PeerManager:
                 response = stub_manager.call(
                     "Request", loopchain_pb2.Message(
                         code=message_code.Request.status,
-                        channel=self.__channel_name
+                        channel=self.__channel_name,
+                        message="check peer status by rs"
                     ), is_stub_reuse=True)
                 if response is None:
                     raise Exception
@@ -622,6 +646,8 @@ class PeerManager:
                 util.apm_event(self.__peer_id, {
                     'event_type': 'DisconnectedPeer',
                     'peer_id': self.__peer_id,
+                    'peer_name': conf.PEER_NAME,
+                    'channel_name': self.__channel_name,
                     'data': {
                         'message': 'there is disconnected peer gRPC Exception: ' + str(e),
                         'peer_id': peer_each.peer_id}})
@@ -634,6 +660,8 @@ class PeerManager:
                     f"peer_manager::check_peer_status "
                     f"peer_id({peer_object_each.peer_info.peer_id}) "
                     f"no response count up({peer_object_each.no_response_count})")
+
+                delete_doubt_peers.append(peer_each)
 
                 if peer_object_each.no_response_count >= conf.NO_RESPONSE_COUNT_ALLOW_BY_HEARTBEAT:
                     peer_each.status = PeerStatus.disconnected
@@ -650,7 +678,8 @@ class PeerManager:
                 #     delete_peer_list.append(peer_each)
 
         logging.debug(f"({self.__channel_name}) Leader Peer Count: ({check_leader_peer_count})")
-        if len(delete_peer_list) > 0 and check_leader_peer_count != 1:
+        # if len(delete_peer_list) > 0 and check_leader_peer_count != 1:
+        if check_leader_peer_count != 1:
             if alive_peer_last is not None:
                 logging.warning(f"reset network({self.__channel_name}) "
                                 f"leader by RS new leader({alive_peer_last.peer_id}) "
@@ -661,9 +690,13 @@ class PeerManager:
                     complained_leader_id=alive_peer_last.peer_id, new_leader_id=alive_peer_last.peer_id,
                     is_broadcast=True
                 )
+
+                # return all delete doubt peers when leader is down! (for network recover immediately)
+                return delete_doubt_peers
             else:
                 logging.error("There is no leader in this network.")
 
+        # return delete confirmed peers only when leader is alive (while network is working).
         return delete_peer_list
 
     def reset_peers(self, group_id, reset_action):
@@ -775,7 +808,8 @@ class PeerManager:
 
             if ObjectManager().peer_service is not None:
                 util.logger.spam(f"peer_manager:remove_peer try remove audience in sub processes")
-                ObjectManager().peer_service.common_service.remove_audience(peer_id, remove_peer.target)
+                ObjectManager().peer_service.channel_manager.remove_audience(
+                    channel=self.__channel_name, peer_target=remove_peer.target)
 
             return True
         except KeyError as e:
@@ -814,15 +848,17 @@ class PeerManager:
         if group_id is None:
             group_id = conf.ALL_GROUP_ID
         peers = ""
+        peer_list = []
         try:
             for peer_id in self.peer_list[group_id]:
                 peer_each = self.peer_list[group_id][peer_id]
+                peer_list.append(peer_each)
                 peers += "\n" + (str(peer_each.order) + ":" + peer_each.target
                                  + " " + str(peer_each.status)) + " " + str(peer_id) + " (" + str(type(peer_id)) + ")"
         except KeyError:
             logging.debug("no peer list")
 
-        return peers
+        return peers, peer_list
 
     def peer_list_full_print_out_for_debug(self):
         """peer list 의 data 목록을 전체 출력한다.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,24 +32,22 @@ class TestRSAdminManager(unittest.TestCase):
     def test_get_channel_info_by_peer_target(self):
         # GIVEN
         default_CHANNEL_MANAGE_DATA_PATH = conf.CHANNEL_MANAGE_DATA_PATH
-        default_ENABLE_CHANNEL_AUTH = conf.ENABLE_CHANNEL_AUTH
         conf.CHANNEL_MANAGE_DATA_PATH = os.path.join(conf.LOOPCHAIN_ROOT_PATH,
                                                      "testcase/unittest/channel_manage_data_for_test.json")
-        conf.ENABLE_CHANNEL_AUTH = True
+        admin_manager = AdminManager("station")
+        peer_target1 = '1.1.1.1:1111'
+        peer_target2 = '2.2.2.2:2222'
+        peer_target3 = '3.3.3.3:3333'
+        peer_target4 = '4.4.4.4:4444'
 
-        peer_target1 = '111.123.123.123:7100'
-        peer_target2 = '222.123.123.123:7200'
-        peer_target3 = '333.123.123.123:7300'
-        peer_target4 = '444.123.123.123:7400'
-
-        channel1 = 'kofia_certificate'
-        channel2 = 'kofia_fine'
+        channel1 = 'loopchain_default'
+        channel2 = 'loopchain_test'
 
         # WHEN
-        channel_infos1 = json.loads(AdminManager("station").get_channel_infos_by_peer_target(peer_target1))
-        channel_infos2 = json.loads(AdminManager("station").get_channel_infos_by_peer_target(peer_target2))
-        channel_infos3 = json.loads(AdminManager("station").get_channel_infos_by_peer_target(peer_target3))
-        channel_infos4 = json.loads(AdminManager("station").get_channel_infos_by_peer_target(peer_target4))
+        channel_infos1 = json.loads(admin_manager.get_channel_infos_by_peer_target(peer_target1))
+        channel_infos2 = json.loads(admin_manager.get_channel_infos_by_peer_target(peer_target2))
+        channel_infos3 = json.loads(admin_manager.get_channel_infos_by_peer_target(peer_target3))
+        channel_infos4 = json.loads(admin_manager.get_channel_infos_by_peer_target(peer_target4))
 
         # THEN
         self.assertEqual(list(channel_infos1.keys()), [channel1, channel2])
@@ -59,14 +57,12 @@ class TestRSAdminManager(unittest.TestCase):
 
         # CLEAR
         conf.CHANNEL_MANAGE_DATA_PATH = default_CHANNEL_MANAGE_DATA_PATH
-        conf.ENABLE_CHANNEL_AUTH = default_ENABLE_CHANNEL_AUTH
 
     def test_get_all_channel_info(self):
         # GIVEN
         default_CHANNEL_MANAGE_DATA_PATH = conf.CHANNEL_MANAGE_DATA_PATH
         conf.CHANNEL_MANAGE_DATA_PATH = os.path.join(conf.LOOPCHAIN_ROOT_PATH,
                                                      "testcase/unittest/channel_manage_data_for_test.json")
-
         # WHEN
         all_channel_info = AdminManager("station").get_all_channel_info()
 
@@ -81,18 +77,43 @@ class TestRSAdminManager(unittest.TestCase):
         default_CHANNEL_MANAGE_DATA_PATH = conf.CHANNEL_MANAGE_DATA_PATH
         conf.CHANNEL_MANAGE_DATA_PATH = os.path.join(conf.LOOPCHAIN_ROOT_PATH,
                                                      "testcase/unittest/channel_manage_data_for_test.json")
-        choice = 'Y'
+        admin_manager = AdminManager("station")
         i = 0
         new_peer_target = '9.9.9.9:9999'
-        default_data = AdminManager("station").json_data
-        channel_list = AdminManager("station").get_channel_list()
-        peer_target_list = default_data[channel_list[0]]["peers"]
+        loaded_data = admin_manager.json_data
+        channel_list = list(loaded_data)
+        peer_target_list = loaded_data[channel_list[0]]["peers"]
 
         # WHEN
-        modified_data = AdminManager("station").add_peer_target(choice, new_peer_target, peer_target_list, i)
+        modified_data = admin_manager.add_peer_target(
+            loaded_data, channel_list, new_peer_target, peer_target_list, i)
+        second_peer_target_list = modified_data[channel_list[0]]["peers"]
 
         # THEN
-        self.assertNotEqual(default_data, modified_data)
+        self.assertEqual(len(second_peer_target_list), 3)
+
+        # CLEAR
+        conf.CHANNEL_MANAGE_DATA_PATH = default_CHANNEL_MANAGE_DATA_PATH
+
+    def test_delete_peer_target(self):
+        # GIVEN
+        default_CHANNEL_MANAGE_DATA_PATH = conf.CHANNEL_MANAGE_DATA_PATH
+        conf.CHANNEL_MANAGE_DATA_PATH = os.path.join(conf.LOOPCHAIN_ROOT_PATH,
+                                                     "testcase/unittest/channel_manage_data_for_test.json")
+        admin_manager = AdminManager("station")
+        i = 0
+        remove_peer_target = '2.2.2.2:2222'
+        loaded_data = admin_manager.json_data
+        filtered_channel_infos = admin_manager.get_channel_infos_by_peer_target(remove_peer_target)
+        filtered_list = list(json.loads(filtered_channel_infos))
+
+        # WHEN
+        modified_data = admin_manager.delete_peer_target(
+            loaded_data, remove_peer_target, filtered_list, i)
+        second_peer_target_list = modified_data[filtered_list[0]]["peers"]
+
+        # THEN
+        self.assertEqual(len(second_peer_target_list), 1)
 
         # CLEAR
         conf.CHANNEL_MANAGE_DATA_PATH = default_CHANNEL_MANAGE_DATA_PATH

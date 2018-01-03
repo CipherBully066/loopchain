@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,11 +17,18 @@ import json
 import logging
 import pickle
 import queue
+import setproctitle
 import time
 from enum import Enum
+from functools import partial
 
+import grpc
+
+from grpc._channel import _Rendezvous
+
+import loopchain.utils as util
 from loopchain import configure as conf
-from loopchain.baseservice import ManageProcess, StubManager, PeerManager
+from loopchain.baseservice import ManageProcess, StubManager, PeerManager, MonitorAdapter, ObjectManager
 from loopchain.blockchain import Transaction
 from loopchain.protos import loopchain_pb2, loopchain_pb2_grpc, message_code
 
@@ -45,7 +52,7 @@ class TxItem:
         return self.__channel_name
 
 
-class BroadcastProcess(ManageProcess):
+class BroadcastProcess(ManageProcess, MonitorAdapter):
     """broadcast class for 'tx_process' and 'broadcast_process'
     One process class has two reason. (Run as two processes shared one code)
     two processes is more stable than one.
@@ -66,12 +73,36 @@ class BroadcastProcess(ManageProcess):
     CREATE_TX_COMMAND = "create_tx"
     STATUS_COMMAND = "status"
 
-    def __init__(self, process_name="Broadcast Process"):
+    def __init__(self, process_name="", channel="", self_target=""):
         ManageProcess.__init__(self)
+        MonitorAdapter.__init__(self, channel=channel, process_name=f"{process_name}_{channel}")
         self.__process_name = process_name
+        self.__channel = channel
+        self.__self_target = self_target
+
+    def is_alive(self):
+        try:
+            if not self.is_run():
+                self._stop_manager()
+                return False
+
+            return True
+        except BrokenPipeError:
+            #  process is already killed
+            return False
+
+    def re_start(self):
+        ObjectManager().peer_service.channel_manager.start_process(
+            process_name=self.__process_name,
+            self_target=ObjectManager().peer_service.peer_target,
+            notify_target=ObjectManager().peer_service.inner_target,
+            channel=self.__channel,
+            is_audience_update=True
+        )
 
     def process_loop(self, manager_dic, manager_list):
         logging.info(f"({self.__process_name}) Start.")
+        setproctitle.setproctitle(f"{setproctitle.getproctitle()} {self.__process_name} {self.__channel}")
 
         # for bloadcast(announce) peer Dic ( key=peer_target, value=stub(gRPC) )
         __audience = {}
@@ -80,50 +111,7 @@ class BroadcastProcess(ManageProcess):
         stored_tx = queue.Queue()
         __process_variables = dict()
         __process_variables[self.PROCESS_VARIABLE_PEER_STATUS] = PeerProcessStatus.normal
-
-        def __broadcast_tx(stored_tx_item: TxItem):
-            # logging.debug(f"({self.__process_name}): broadcast tx audience({len(__audience)})")
-            result_add_tx = None
-
-            for peer_target in list(__audience):
-                # logging.debug("peer_target: " + peer_target)
-                stub_item = __audience[peer_target]
-                stub_item.call_async(
-                    "AddTx", loopchain_pb2.TxSend(
-                        tx=stored_tx_item.tx_dump,
-                        channel=stored_tx_item.channel_name)
-                )
-
-            return result_add_tx
-
-        def create_tx_continue():
-            # 저장된 작업이 있으면 전송한다.
-            while not stored_tx.empty():
-                stored_tx_item = stored_tx.get()
-                __broadcast_tx(stored_tx_item)
-
-        def __broadcast_run(method_name, method_param):
-            """call gRPC interface of audience
-
-            :param method_name: gRPC interface
-            :param method_param: gRPC message
-            """
-            # logging.debug(f"...do broadcast run... ({len(__audience)})")
-
-            for peer_target in list(__audience):
-                # logging.debug("peer_target: " + peer_target)
-                stub_item = __audience[peer_target]
-                stub_item.call_async(method_name, method_param)
-
-        def __handler_subscribe(subscribe_peer_target):
-            # logging.debug("BroadcastProcess received subscribe command peer_target: " + str(subscribe_peer_target))
-            if subscribe_peer_target not in __audience:
-                stub_manager = StubManager.get_stub_manager_to_server(
-                    subscribe_peer_target, loopchain_pb2_grpc.PeerServiceStub,
-                    time_out_seconds=conf.CONNECTION_RETRY_TIMEOUT_WHEN_INITIAL,
-                    is_allow_null_stub=True
-                )
-                __audience[subscribe_peer_target] = stub_manager
+        __broadcast_run = None  # broadcast func (async or sync)
 
         def __handler_unsubscribe(unsubscribe_peer_target):
             # logging.debug(f"BroadcastProcess received unsubscribe command peer_target({unsubscribe_peer_target})")
@@ -132,14 +120,95 @@ class BroadcastProcess(ManageProcess):
             except KeyError:
                 logging.warning("Already deleted peer: " + str(unsubscribe_peer_target))
 
+        def __get_tx_message(tx_itme):
+            message = loopchain_pb2.TxSend(
+                tx=tx_itme.tx_dump,
+                channel=tx_itme.channel_name)
+            return message
+
+        def create_tx_continue():
+            # 저장된 작업이 있으면 전송한다.
+            while not stored_tx.empty():
+                stored_tx_item = stored_tx.get()
+                __broadcast_run("AddTx", __get_tx_message(stored_tx_item))
+
+        def __broadcast_retry_async(peer_target, method_name, method_param, retry_times, result: _Rendezvous):
+            if result.code() != grpc.StatusCode.OK:
+                logging.warning(f"__broadcast_run_async fail({result})\n"
+                                f"cause by: {result.details()}\n"
+                                f"peer_target({peer_target})\n"
+                                f"method_name({method_name})\n"
+                                f"method_param({method_param})\n"
+                                f"retry_remains({retry_times})")
+                if retry_times > 0:
+                    retry_times -= 1
+                    __call_async_to_target(peer_target, method_name, method_param, retry_times)
+
+        def __call_async_to_target(peer_target, method_name, method_param, retry_times):
+            try:
+                stub_item = __audience[peer_target]
+            except KeyError as e:
+                logging.debug(f"broadcast_process:__call_async_to_target ({peer_target}) not in audience. ({e})")
+            else:
+                call_back_partial = partial(__broadcast_retry_async, peer_target, method_name, method_param, retry_times)
+                stub_item.call_async(method_name=method_name, message=method_param, call_back=call_back_partial)
+
+        def __broadcast_run_async(method_name, method_param, retry_times=None):
+            """call gRPC interface of audience
+
+            :param method_name: gRPC interface
+            :param method_param: gRPC message
+            """
+            retry_times = conf.BROADCAST_RETRY_TIMES if retry_times is None else retry_times
+            logging.debug(f"({self.__process_name}): broadcast({method_name}) async... ({len(__audience)})")
+
+            for peer_target in list(__audience):
+                logging.debug("peer_target: " + peer_target)
+                __call_async_to_target(peer_target, method_name, method_param, retry_times)
+
+        def __broadcast_run_sync(method_name, method_param):
+            """call gRPC interface of audience
+
+            :param method_name: gRPC interface
+            :param method_param: gRPC message
+            """
+            logging.debug(f"({self.__process_name}): broadcast({method_name}) sync... ({len(__audience)})")
+
+            for peer_target in list(__audience):
+                logging.debug("peer_target: " + peer_target)
+                stub_item = __audience[peer_target]
+
+                response = stub_item.call_in_times(
+                    method_name=method_name,
+                    message=method_param,
+                    timeout=conf.GRPC_TIMEOUT_BROADCAST_RETRY)
+
+                if response is None:
+                    logging.warning(f"broadcast_process:__broadcast_run_sync fail ({method_name}) "
+                                    f"process({self.__process_name}) "
+                                    f"target({peer_target}) ")
+                    # __handler_unsubscribe(peer_target)
+
+        def __handler_subscribe(subscribe_peer_target):
+            logging.debug("BroadcastProcess received subscribe command peer_target: " + str(subscribe_peer_target))
+            if subscribe_peer_target not in __audience:
+                stub_manager = StubManager.get_stub_manager_to_server(
+                    subscribe_peer_target, loopchain_pb2_grpc.PeerServiceStub,
+                    time_out_seconds=conf.CONNECTION_RETRY_TIMEOUT_WHEN_INITIAL,
+                    is_allow_null_stub=True,
+                    ssl_auth_type=conf.GRPC_SSL_TYPE
+                )
+                __audience[subscribe_peer_target] = stub_manager
+
         def __handler_update_audience(audience_param):
+            util.logger.spam(f"broadcast_process:__handler_update_audience audience_param({audience_param})")
             peer_manager = PeerManager()
             peer_list_data = pickle.loads(audience_param)
             peer_manager.load(peer_list_data, False)
 
             for peer_id in list(peer_manager.peer_list[conf.ALL_GROUP_ID]):
                 peer_each = peer_manager.peer_list[conf.ALL_GROUP_ID][peer_id]
-                if peer_each.target != __process_variables[self.SELF_PEER_TARGET_KEY]:
+                if peer_each.target != self.__self_target:
                     logging.warning(f"broadcast process peer_targets({peer_each.target})")
                     __handler_subscribe(peer_each.target)
 
@@ -178,7 +247,7 @@ class BroadcastProcess(ManageProcess):
                                 + str(stored_tx.qsize()))
             else:
                 create_tx_continue()
-                __broadcast_tx(tx_item)
+                __broadcast_run("AddTx", __get_tx_message(tx_item))
 
         def __handler_connect_to_leader(connect_to_leader_param):
             # logging.debug("(tx process) try... connect to leader: " + str(connect_to_leader_param))
@@ -197,7 +266,8 @@ class BroadcastProcess(ManageProcess):
             stub_to_self_peer = StubManager.get_stub_manager_to_server(
                 connect_param, loopchain_pb2_grpc.InnerServiceStub,
                 time_out_seconds=conf.CONNECTION_RETRY_TIMEOUT_WHEN_INITIAL,
-                is_allow_null_stub=True
+                is_allow_null_stub=True,
+                ssl_auth_type=conf.SSLAuthType.none
             )
             __process_variables[self.SELF_PEER_TARGET_KEY] = connect_param
             __process_variables[self.PROCESS_VARIABLE_STUB_TO_SELF_PEER] = stub_to_self_peer
@@ -212,6 +282,11 @@ class BroadcastProcess(ManageProcess):
             self.MAKE_SELF_PEER_CONNECTION_COMMAND: __handler_connect_to_self_peer,
             self.STATUS_COMMAND: __handler_status
         }
+
+        if conf.IS_BROADCAST_ASYNC:
+            __broadcast_run = __broadcast_run_async
+        else:
+            __broadcast_run = __broadcast_run_sync
 
         while command != ManageProcess.QUIT_COMMAND:
 

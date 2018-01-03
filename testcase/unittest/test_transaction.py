@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,12 @@ import time
 import unittest
 import pickle
 import sys
+
+import os
+
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+
 import loopchain.utils as util
 import testcase.unittest.test_util as test_util
 from loopchain.blockchain import Transaction, TransactionStatus
@@ -45,7 +51,30 @@ class TestTransaction(unittest.TestCase):
         test_util.print_testname(self._testMethodName)
 
     def tearDown(self):
-        pass
+
+        channel0 = conf.LOOPCHAIN_DEFAULT_CHANNEL
+        channel1 = conf.LOOPCHAIN_TEST_CHANNEL
+
+        conf.CHANNEL_OPTION = {
+            channel0: {
+                "load_cert": False,
+                "consensus_cert_use": False,
+                "tx_cert_use": False,
+                "key_load_type": conf.KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+                "private_password": b'test'
+            },
+            channel1: {
+                "load_cert": False,
+                "consensus_cert_use": False,
+                "tx_cert_use": False,
+                "key_load_type": conf.KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/public.der'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_pki/private.der'),
+                "private_password": b'test'
+            }
+        }
 
     def test_get_meta_and_put_meta(self):
         # GIVEN
@@ -167,15 +196,13 @@ class TestTransaction(unittest.TestCase):
         self.assertLessEqual(sys.getsizeof(dump_a), sys.getsizeof(dump_b) * 1.5)
 
     def test_signature_validate(self):
-        """ GIVEN success tx, invalid public key tx, invalid signature tx,
+        """GIVEN success tx, invalid public key tx, invalid signature tx,
         WHEN validate 3 tx
         THEN only success tx validate return true
         """
         # GIVEN
         # init peer_auth for signautre
-        peer_auth = PeerAuthorization(public_file=conf.PUBLIC_PATH,
-                                      pri_file=conf.PRIVATE_PATH,
-                                      cert_pass=conf.DEFAULT_PW)
+        peer_auth = PeerAuthorization(channel=list(conf.CHANNEL_OPTION)[0])
 
         # create txs
         success_tx = test_util.create_basic_tx("aaa", peer_auth)
@@ -193,6 +220,36 @@ class TestTransaction(unittest.TestCase):
         self.assertFalse(Transaction.validate(invalid_public_tx, is_exception_log=False))
         logging.debug("start validate invalid signature")
         self.assertFalse(Transaction.validate(invalid_sign_tx, is_exception_log=False))
+
+    def test_cert_signature(self):
+        """GIVEN conf.TX_CERT_AUTH = True, PeerAuthorization create using cert
+        WHEN create new tx and create signature
+        THEN tx.public_key must be x.509 der cert
+        """
+        channel_name = "cert_channel"
+        conf.CHANNEL_OPTION = {
+            channel_name: {
+                "load_cert": True,
+                "consensus_cert_use": True,
+                "tx_cert_use": True,
+                "key_load_type": conf.KeyLoadType.FILE_LOAD,
+                "public_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_certs/cert.pem'),
+                "private_path": os.path.join(conf.LOOPCHAIN_ROOT_PATH, 'resources/default_certs/key.pem'),
+                "private_password": None
+            }
+        }
+        peer_auth = PeerAuthorization(channel_name)
+
+        # WHEN
+        tx = Transaction()
+        tx.put_data('{"a":"b"}')
+        tx.sign_hash(peer_auth)
+
+        # THEN
+        logging.debug(f"tx public key : {tx.public_key}")
+        self.assertEqual(tx.public_key, peer_auth.tx_cert)
+        # tx.publickey using for load certificate and not raise any error
+        x509.load_der_x509_certificate(tx.public_key, default_backend())
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import loopchain.utils as util
 from loopchain import configure as conf
 from loopchain.baseservice import PeerStatus, PeerInfo, ObjectManager
 from loopchain.peer import ChannelManager
+from loopchain.configure_default import KeyLoadType
 from loopchain.protos import loopchain_pb2_grpc, message_code
 
 # loopchain_pb2 를 아래와 같이 import 하지 않으면 broadcast 시도시 pickle 오류가 발생함
@@ -132,7 +133,7 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
             )
 
     def Request(self, request, context):
-        logging.debug("RadioStationService got request: " + str(request))
+        logging.debug(f"rs_outer_service:Request({request})")
 
         if request.code in self.__handler_map.keys():
             return self.__handler_map[request.code](request, context)
@@ -172,9 +173,12 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         :param context:
         :return:
         """
-
-        channel_infos: str = \
-            ObjectManager().rs_service.admin_manager.get_channel_infos_by_peer_target(request.peer_target)
+        if conf.ENABLE_CHANNEL_AUTH:
+            channel_infos: str = \
+                ObjectManager().rs_service.admin_manager.get_channel_infos_by_peer_target(request.peer_target)
+        else:
+            channel_infos: str = ObjectManager().rs_service.admin_manager.get_all_channel_info()
+        logging.info(f"rs_outer_service:GetChannelInfos target({request.peer_target}) channel_infos({channel_infos})")
 
         return loopchain_pb2.GetChannelInfosReply(
             response_code=message_code.Response.success,
@@ -188,11 +192,17 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         :param context:
         :return: ConnectPeerReply
         """
-        logging.info("Trying to connect peer: "+request.peer_id)
+        logging.info(f"Trying to connect peer: {request.peer_id}")
 
-        res, info = ObjectManager().rs_service.validate_group_id(request.group_id)
-        if res < 0:  # send null list(b'') while wrong input.
-            return loopchain_pb2.ConnectPeerReply(status=message_code.Response.fail, peer_list=b'', more_info=info)
+        if conf.ENABLE_CHANNEL_AUTH:
+            if request.peer_target not in ObjectManager().rs_service.admin_manager.get_peer_list_by_channel(
+                    request.channel):
+                status, reason = message_code.get_response(message_code.Response.fail_invalid_peer_target)
+                return loopchain_pb2.ConnectPeerReply(
+                    status=status,
+                    peer_list=b'',
+                    more_info=reason
+                )
 
         # TODO check peer's authorization for channel
         channel_name = conf.LOOPCHAIN_DEFAULT_CHANNEL if not request.channel else request.channel
@@ -205,10 +215,10 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         #         peer_list=b'',
         #         more_info=f"channel({channel_name}) is not authorized for peer_id({request.peer_id})")
 
-        logging.debug("Connect Peer "
-                      + "\nPeer_id : " + request.peer_id
-                      + "\nGroup_id : " + request.group_id
-                      + "\nPeer_target : " + request.peer_target)
+        logging.debug(f"Connect Peer "
+                      f"\nPeer_id : {request.peer_id}"
+                      f"\nPeer_target : {request.peer_target}"
+                      f"\nChannel : {request.channel}")
 
         peer = PeerInfo(request.peer_id, request.group_id, request.peer_target, PeerStatus.unknown, cert=request.cert)
 
@@ -258,18 +268,19 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         logging.debug(f"rs service GetPeerStatus peer_id({request.peer_id}) group_id({request.group_id})")
 
         # get stub of target peer
-        peer_stub_manager = ObjectManager().rs_service.channel_manager.get_peer_manager(
-            channel_name).get_peer_stub_manager(
-            ObjectManager().rs_service.channel_manager.get_peer_manager(channel_name).get_peer(request.peer_id))
-        if peer_stub_manager is not None:
-            try:
-                response = peer_stub_manager.call_in_times(
-                    "GetStatus",
-                    loopchain_pb2.StatusRequest(request="get peer status from rs", channel=channel_name))
-                if response is not None:
-                    return response
-            except Exception as e:
-                logging.warning(f"fail GetStatus... ({e})")
+        peer_manager = ObjectManager().rs_service.channel_manager.get_peer_manager(channel_name)
+        peer = peer_manager.get_peer(request.peer_id)
+        if peer is not None:
+            peer_stub_manager = peer_manager.get_peer_stub_manager(peer)
+            if peer_stub_manager is not None:
+                try:
+                    response = peer_stub_manager.call_in_times(
+                        "GetStatus",
+                        loopchain_pb2.StatusRequest(request="get peer status from rs", channel=channel_name))
+                    if response is not None:
+                        return response
+                except Exception as e:
+                    logging.warning(f"fail GetStatus... ({e})")
 
         return loopchain_pb2.StatusReply(status="", block_height=0, total_tx=0)
 
@@ -297,7 +308,7 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
             return loopchain_pb2.CommonReply(response_code=message_code.Response.success, message="success")
 
     def GetRandomTable(self, request, context):
-        if conf.ENABLE_KMS:
+        if conf.KEY_LOAD_TYPE == KeyLoadType.RANDOM_TABLE_DERIVATION:
             try:
                 serialized_table = json.dumps(ObjectManager().rs_service.random_table)
                 return loopchain_pb2.CommonReply(response_code=message_code.Response.success, message=serialized_table)
@@ -319,7 +330,7 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         """
         channel = conf.LOOPCHAIN_DEFAULT_CHANNEL if request.channel == '' else request.channel
         logging.debug("Radio Station Subscription peer_id: " + str(request))
-        ObjectManager().rs_service.common_service.add_audience(request)
+        ObjectManager().rs_service.channel_manager.add_audience(channel, request.peer_target)
 
         peer = ObjectManager().rs_service.channel_manager.get_peer_manager(channel).update_peer_status(
             peer_id=request.peer_id, peer_status=PeerStatus.connected)
@@ -356,9 +367,17 @@ class OuterService(loopchain_pb2_grpc.RadioStationServicer):
         :param context:
         :return: CommonReply
         """
-        channel_name = conf.LOOPCHAIN_DEFAULT_CHANNEL if request.channel == '' else request.channel
+        channel = conf.LOOPCHAIN_DEFAULT_CHANNEL if request.channel == '' else request.channel
         logging.debug("Radio Station UnSubscription peer_id: " + request.peer_target)
-        ObjectManager().rs_service.channel_manager.get_peer_manager(channel_name).remove_peer(request.peer_id, request.group_id)
-        ObjectManager().rs_service.common_service.remove_audience(request.peer_id, request.peer_target)
+        channel_manager = ObjectManager().rs_service.channel_manager
+
+        # TODO UnSubscribe 를 호출한 정상 종료의 경우 rs heartbeat 이 동작하지 않게 되므로 임시로 아래 로직을 주석처리 한다.
+        # channel_manager.get_peer_manager(channel).remove_peer(
+        #     request.peer_id, request.group_id)
+        # channel_manager.remove_audience(
+        #     channel=channel, peer_target=request.peer_target)
+
+        # channel_manager.get_peer_manager(channel).announce_delete_peer(request)
+
         return loopchain_pb2.CommonReply(response_code=0, message="success")
 

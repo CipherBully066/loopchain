@@ -1,4 +1,3 @@
-
 Peer RESTful API
 ----------------
 
@@ -135,7 +134,7 @@ Score 실행 결과를 Transaction Hash를 통해 가져옴
 ```
 
 
-###  /api/v1/transactions
+### POST /api/v1/transactions
 트랜잭션을 생성하여 SCORE를 실행
 
 #### Request BODY

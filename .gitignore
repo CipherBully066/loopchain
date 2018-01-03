@@ -78,7 +78,6 @@ __pycache__/
 *$py.class
 
 # C extensions
-*.so
 
 # Distribution / packaging
 .Python
@@ -185,6 +184,7 @@ resources/test_score_deploy/
 resources/test_score_repository/loopchain/
 resources/test_score_repository/develop/test_score/deploy/
 resources/test_score_repository/develop/test_query_exception/deploy/
+resources/ssl_grpc_test_cert/ssl.crt
 resources/default_pki/*.der
 score/loopchain/
 score/develop/dev_score/deploy
@@ -195,7 +195,8 @@ score/develop/certificate
 loopchain/configure_user.py
 run_a_test.sh
 testcase/unittest/blockchain_db*
-channel_manage_data_test.json
+channel_manage_data_test2.json
+channel_manage_data_ori.json
 
 gen_docs/_build
 gen_docs/docs

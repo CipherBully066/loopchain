@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ from loopchain.container import ScoreService
 from loopchain.peer import PeerService, PeerAuthorization
 from loopchain.protos import loopchain_pb2, loopchain_pb2_grpc
 from loopchain.radiostation import RadioStationService
+from loopchain.tools.grpc_helper import GRPCHelper
+
 
 util.set_log_level_debug()
 
@@ -57,6 +59,8 @@ def run_peer_server(port, radiostation_port=conf.PORT_RADIOSTATION, group_id=Non
 
 
 def run_black_peer_server(port, radiostation_port=conf.PORT_RADIOSTATION, group_id=None):
+    from testcase.integration.black_service import BlackService
+
     ObjectManager().peer_service = BlackService(group_id, conf.IP_RADIOSTATION, radiostation_port)
     conf.DEFAULT_SCORE_REPOSITORY_PATH = \
         os.path.join(os.path.dirname(__file__), '..', '..', 'resources', 'test_score_repository')
@@ -72,7 +76,8 @@ def run_radio_station(port):
 
 
 def run_score_server(port):
-    ScoreService(port)
+    # ScoreService(port)
+    ScoreService(port, conf.LOOPCHAIN_DEFAULT_CHANNEL)
 
 
 def run_peer_server_as_process(port, radiostation_port=conf.PORT_RADIOSTATION, group_id=None, score=None):
@@ -84,7 +89,7 @@ def run_peer_server_as_process(port, radiostation_port=conf.PORT_RADIOSTATION, g
 
 def run_peer_server_as_process_and_stub(port, radiostation_port=conf.PORT_RADIOSTATION, group_id=None, score=None):
     process = run_peer_server_as_process(port, radiostation_port, group_id, score)
-    channel = grpc.insecure_channel('localhost:' + str(port))
+    channel = GRPCHelper().create_client_channel('localhost:' + str(port))
     stub = loopchain_pb2_grpc.PeerServiceStub(channel)
     util.request_server_in_time(stub.GetStatus, loopchain_pb2.StatusRequest(request=""))
     return process, stub
@@ -94,7 +99,7 @@ def run_peer_server_as_process_and_stub_manager(
         port, radiostation_port=conf.PORT_RADIOSTATION, group_id=None, score=None):
     process = run_peer_server_as_process(port, radiostation_port, group_id, score)
     stub_manager = StubManager.get_stub_manager_to_server(
-        'localhost:' + str(port), loopchain_pb2_grpc.PeerServiceStub)
+        'localhost:' + str(port), loopchain_pb2_grpc.PeerServiceStub, ssl_auth_type=conf.GRPC_SSL_TYPE)
     return process, stub_manager
 
 
@@ -107,7 +112,7 @@ def run_black_peer_server_as_process(port, radiostation_port=conf.PORT_RADIOSTAT
 
 def run_black_peer_server_as_process_and_stub(port, radiostation_port=conf.PORT_RADIOSTATION, group_id=None):
     process = run_black_peer_server_as_process(port, radiostation_port, group_id)
-    channel = grpc.insecure_channel('localhost:' + str(port))
+    channel = GRPCHelper().create_client_channel('localhost:' + str(port))
     stub = loopchain_pb2_grpc.PeerServiceStub(channel)
     return process, stub
 
@@ -122,14 +127,14 @@ def run_radio_station_as_process(port):
 def run_radio_station_as_process_and_stub_manager(port):
     process = run_radio_station_as_process(port)
     stub_manager = StubManager.get_stub_manager_to_server(
-        'localhost:' + str(port), loopchain_pb2_grpc.RadioStationStub)
+        'localhost:' + str(port), loopchain_pb2_grpc.RadioStationStub, conf.GRPC_SSL_TYPE)
     util.request_server_in_time(stub_manager.stub.GetStatus, loopchain_pb2.StatusRequest(request=""))
     return process, stub_manager
 
 
 def run_radio_station_as_process_and_stub(port):
     process = run_radio_station_as_process(port)
-    channel = grpc.insecure_channel('localhost:' + str(port))
+    channel = GRPCHelper().create_client_channel('localhost:' + str(port))
     stub = loopchain_pb2_grpc.RadioStationStub(channel)
     util.request_server_in_time(stub.GetStatus, loopchain_pb2.StatusRequest(request=""))
     return process, stub
@@ -204,15 +209,15 @@ def create_basic_tx(peer_id: str, peer_auth: PeerAuthorization) -> Transaction:
     """
     tx = Transaction()
     tx.put_meta('peer_id', peer_id)
+    tx.put_meta(Transaction.CHANNEL_KEY, conf.LOOPCHAIN_DEFAULT_CHANNEL)
     tx.put_data("{args:[]}")
     tx.sign_hash(peer_auth)
     return tx
 
 
-def create_peer_auth() -> PeerAuthorization:
-    peer_auth = PeerAuthorization(public_file=conf.PUBLIC_PATH,
-                                  pri_file=conf.PRIVATE_PATH,
-                                  cert_pass=conf.DEFAULT_PW)
+def create_default_peer_auth() -> PeerAuthorization:
+    channel = list(conf.CHANNEL_OPTION)[0]
+    peer_auth = PeerAuthorization(channel)
     return peer_auth
 
 

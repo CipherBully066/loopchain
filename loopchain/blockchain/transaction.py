@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import time
 import loopchain.utils as util
 from enum import Enum
 from loopchain import configure as conf
-from loopchain.tools import PublicVerifierContainer
+from loopchain.tools.signature_helper import PublicVerifierContainer
 
 
 class TransactionStatus(Enum):
@@ -204,7 +204,7 @@ class Transaction:
         :return: if sign success return true, else return false
         """
         signature = peer_authorization.sign_data(self.tx_hash, is_hash=True)
-        self.__public_key = peer_authorization.get_public_der()
+        self.__public_key = peer_authorization.tx_cert
 
         if signature:
             self.__signature = signature
@@ -228,7 +228,7 @@ class Transaction:
                 return False
 
             # Get Cert Verifier for signature verify
-            public_verifier = PublicVerifierContainer.get_public_verifier(tx.public_key)
+            public_verifier = PublicVerifierContainer.get_public_verifier(tx.meta[Transaction.CHANNEL_KEY], tx.public_key)
 
             # Signature Validate
             if public_verifier.verify_hash(tx.get_tx_hash(), tx.signature):
@@ -246,7 +246,7 @@ class Transaction:
 
     @staticmethod
     def __logging_tx_validate(fail_message, tx):
-        logging.error("validate tx fail \ntx hash : " + tx.get_tx_hash() +
+        logging.exception("validate tx fail \ntx hash : " + tx.get_tx_hash() +
                       "\ntx meta : " + str(tx.meta) +
                       "\ntx data : " + str(tx.get_data()) +
                       "\ntx signature : " + str(tx.signature) +

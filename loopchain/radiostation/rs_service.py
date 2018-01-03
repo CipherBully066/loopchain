@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -68,17 +68,18 @@ class RadioStationService:
             # 인증서 로드
             self.__ca.load_pki(cert_path, cert_pass)
 
-        if conf.ENABLE_KMS:
-            if rand_seed is None:
-                util.exit_and_msg("KMS needs input random seed \n"
-                                  "you can put seed -s --seed")
-            self.__random_table = self.__create_random_table(rand_seed)
+        # TODO: Multichannel 화 해야함
+        # if conf.KEY_LOAD_TYPE == conf.KeyLoadType.RANDOM_TABLE_DERIVATION:
+        #     if rand_seed is None:
+        #         util.exit_and_msg("KMS needs input random seed \n"
+        #                           "you can put seed -s --seed")
+        #     self.__random_table = self.__create_random_table(rand_seed)
 
         logging.info("Current RadioStation SECURITY_MODE : " + str(self.__ca.is_secure))
 
         # gRPC service for Radiostation
         self.__outer_service = OuterService()
-        self.__admin_service = AdminService()
+        self.__admin_service = AdminService(self.__admin_manager)
 
         # {group_id:[ {peer_id:IP} ] }로 구성된 dictionary
         self.peer_groups = {conf.ALL_GROUP_ID: []}
@@ -93,10 +94,6 @@ class RadioStationService:
 
     def launch_block_generator(self):
         pass
-
-    def validate_group_id(self, group_id: str):
-        # TODO group id 를 검사하는 새로운 방법이 필요하다, 현재는 임시로 모두 통과 시킨다.
-        return 0, "It's available group ID:"+group_id
 
     @property
     def admin_manager(self):
@@ -118,8 +115,8 @@ class RadioStationService:
         """새로 들어온 peer 를 기존의 peer 들에게 announce 한다."""
 
         logging.debug("Broadcast New Peer.... " + str(peer_request))
-        if self.__common_service is not None:
-            self.__common_service.broadcast("AnnounceNewPeer", peer_request)
+        if self.__channel_manager is not None:
+            self.__channel_manager.broadcast(peer_request.channel, "AnnounceNewPeer", peer_request)
 
     def check_peer_status(self):
         """service loop for status heartbeat check to peer list
@@ -138,7 +135,7 @@ class RadioStationService:
                     peer_id=delete_peer.peer_id,
                     channel=channel,
                     group_id=delete_peer.group_id)
-                self.__common_service.broadcast("AnnounceDeletePeer", message)
+                self.__channel_manager.broadcast(channel, "AnnounceDeletePeer", message)
 
     def __create_random_table(self, rand_seed: int) -> list:
         """create random_table using random_seed
@@ -164,6 +161,9 @@ class RadioStationService:
             port = conf.PORT_RADIOSTATION
         stopwatch_start = timeit.default_timer()
 
+        # TODO radiostation 이 이중화 될 경우 각각의 ID 로 아래 'radiostation' 문구를 대체한다.
+        util.set_log_level("radiostation")
+
         self.__channel_manager = ChannelManager(self.__common_service)
 
         if conf.ENABLE_REST_SERVICE:
@@ -181,6 +181,7 @@ class RadioStationService:
         stopwatch_duration = timeit.default_timer() - stopwatch_start
         logging.info(f"Start Radio Station start duration({stopwatch_duration})")
 
+        # setproctitle.setproctitle(f"{setproctitle.getproctitle()} RS Service port({port})")
         # service 종료를 기다린다.
         self.__common_service.wait()
 

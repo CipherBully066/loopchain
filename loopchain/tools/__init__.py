@@ -11,9 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""A package for libraries of Score
-"""
-
-from .chain_helper import *
-from .score_helper import *
-from .signature_helper import *

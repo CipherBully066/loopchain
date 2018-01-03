@@ -101,7 +101,7 @@ Basically, loopchain settings are managed by files.
     - This file is also a configuration file that can be customized depending on your development environment.
     - You can add the configuration settings according to the json format.
     - It has **the highest priority** of all configuation files (configure_default.py, configure_user.py, etc.).
-    - When you run `peer.py` or `radiostation.py`, you can apply it by appending `-o {JSON FILE PATH}` or `--configure_file_path {JSON FILE PATH}` option.
+    - When you run `peer` or `radiostation`, you can apply it by appending `-o {JSON FILE PATH}` or `--configure_file_path {JSON FILE PATH}` option.
 
 #### Example
 
@@ -115,11 +115,11 @@ First, you should add the following setting to the `/loopchain/configure.json` f
 
 Later when you launch peer, you should add one of these following options:
 ```
-$ ./peer.py -o loopchain/configure.json                      # or
-$ ./peer.py --configure_file_path loopchain/configure.json
+$ ./loopchain.py peer -o loopchain/configure.json                      # or
+$ ./loopchain.py peer --configure_file_path loopchain/configure.json
 ```
 
-This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply the same logic to `radiostation.py` as well.
+This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply the same logic to `radiostation` as well.
 
 
 ## Multichannel 
@@ -137,7 +137,7 @@ This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply 
     "score_package": "your_score_package", // The name of SCORE to execute in this channel.
     "peers": [
       {
-        "peer_target": "%IP%:%PORT%" // The list of eer targets
+        "peer_target": "%IP%:%PORT%" // The list of peer targets
       },
      ........
     ]
@@ -146,7 +146,7 @@ This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply 
     "score_package": "your_score_package", // The name of SCORE to execute in this channel
     "peers": [
       {
-        "peer_target": ""%IP%:%PORT%"   // The list of eer targets
+        "peer_target": ""%IP%:%PORT%"   // The list of peer targets
       },
       .......
     ]
@@ -181,6 +181,9 @@ This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply 
 }
 
 ```
+
+`TIP: If you wanna load one SCORE, then configure one channel in ```channel_manage_data.json ```.
+
   
 ### 2. Configure and execute RadioStation with configuration file. 
 
@@ -197,8 +200,8 @@ This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply 
  The meaning of each parameter is, 
   * ```CHANNEL_MANAGE_DATA_PATH```: The path of multichannel configuration file. It have to include file name.  
   * ```ENABLE_CHANNEL_AUTH``` :  
-     - ```true``` = Allow to join peer registered in channel manage data file.
-     - ```false```= You can add peer randomly. You can use this when you don't have the peer list.
+     - ```true``` : Allow to join peer registered in channel manage data file.
+     - ```false```: You can add peer randomly. You can use this when you don't have the peer list.
 
  
  For example, you can create ```rs_config.json```and put the contents like below. 
@@ -214,7 +217,7 @@ This will modify your default "PORT_PEER" path 7100 to 7500. You can also apply 
  And load this configuration file with ```-o``` option.
  
  ```
-$ ./radiostation.py -o rs_config.js
+$ ./loopchain.py rs -o rs_config.js
 ```
 
 ### 3. Configure and execute peer. 
@@ -245,7 +248,7 @@ For example,
 
 You can run peer with configuration like below. 
 ```
-$ ./peer.py -o peer_config.js
+$ ./loopchain.py peer -o peer_config.js
 ```
 
 
@@ -259,8 +262,9 @@ There are two ways to run a loopchain:
 #### 1. Launch RadioStation
 
  ```
- $  ./radiostation.py  # Execute RadioStation.
-   ```
+ $ ./loopchain.py radiostation  # or
+ $ ./loopchain.py rs   # Execute RadioStation.
+ ```
 
    You should now see the following log. This means that **it is waiting at Local for another peer to connect to the 9002 port.** So now you have successfully lauched RadioStation service.
 
@@ -277,12 +281,12 @@ There are two ways to run a loopchain:
  Open a new terminal and go to the LoopChain folder. Then type the following.
   ```
  $ source bin/activate  # Open python virtual workspace.
- $ ./peer.py            # Launch peer.
+ $ ./loopchain.py peer            # Launch peer.
    ```
  
  However, if you have additional settings in configure.json file, type the following when you launch peer.
  ```
- $ ./peer.py -o loopchain/configure.json
+ $ ./loopchain.py peer -o loopchain/configure.json
  ```
  
  Then you will see the following log.
@@ -301,7 +305,7 @@ There are two ways to run a loopchain:
 
 ```
 $ source bin/activate
-$ ./peer.py -p 7101
+$ ./loopchain.py peer -p 7101
 ```
  When connecting to RadioStation, each peer receives new port starting from 7100 port. Each time a new peer is connected, RadioStation delivers a list of existing peers to the new peer and informs existing peers that a new peer has been added.
 

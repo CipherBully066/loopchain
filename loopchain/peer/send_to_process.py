@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,7 +36,12 @@ class SendToProcess(CommonThread):
         :param PeerProcess 에 전달하는 command 와 param 의 쌍
         """
         # logging.debug("send job queue add")
+
+        if self.__job.qsize() > conf.MAX_CREATE_TX_QUEUE:
+            return False
+
         self.__job.put(params)
+        return True
 
     def run(self):
         while self.is_run():
@@ -52,6 +57,7 @@ class SendToProcess(CommonThread):
                     param = None
                 except Exception as e:
                     logging.warning(f"process not init yet... ({e})")
+                    time.sleep(conf.SLEEP_SECONDS_FOR_SUB_PROCESS_START)
                     break
 
             if param is not None:

@@ -1,4 +1,4 @@
-# Copyright 2017 theloop, Inc.
+# Copyright 2017 theloop Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -58,12 +58,16 @@ class ConsensusSiever(ConsensusBase):
                 logging.warning("Time Outed Block not confirmed duration: " + str(util.diff_in_seconds(e.block.time_stamp)))
 
                 self._candidate_blocks.remove_broken_block(e.block.block_hash)
+                # TODO time out block 에 대한 throw out 처리가 안되어 있다.
+                # 아래 코드를 hotfix 로 적용, 테스트는 안되어 있다 !!
+                self.__throw_out_block(e.block)
             else:
-                peer_service = ObjectManager().peer_service
-                if peer_service is not None:
-                    peer_service.reset_voter_count()
-
-                self._candidate_blocks.reset_voter_count(str(e.block.block_hash))
+                # not complete validate 일때 voter reset 대신 그냥 기다린다. (hotfix-81)
+                # peer_service = ObjectManager().peer_service
+                # if peer_service is not None:
+                #     peer_service.reset_voter_count()
+                #
+                # self._candidate_blocks.reset_voter_count(str(e.block.block_hash))
                 time.sleep(conf.INTERVAL_WAIT_PEER_VOTE)
         except candidate_blocks.InvalidatedBlock as e:
             # 실패한 투표에 대한 처리
@@ -98,7 +102,9 @@ class ConsensusSiever(ConsensusBase):
                 # 검증 받을 블록의 hash 를 생성하고 후보로 등록한다.
                 # logging.warning("add unconfirmed block to candidate blocks")
                 self._block.generate_block(self._candidate_blocks.get_last_block(self._blockchain))
-                self._block.sign(ObjectManager().peer_service.auth)
+                self._block.sign(
+                    ObjectManager().peer_service.channel_manager.get_peer_auth(self._channel_name)
+                )
                 self._candidate_blocks.add_unconfirmed_block(self._block)
 
                 # logging.warning("blockchain.last_block_hash: " + self._blockchain.last_block.block_hash)
@@ -118,6 +124,7 @@ class ConsensusSiever(ConsensusBase):
                 logging.info("candidate block hash: " + self._current_vote_block_hash)
 
                 util.logger.spam(f"consensus_siever:consensus try peer_manager.get_next_leader_peer().peer_id")
+                # TODO get next leader peer().peer_id 는 None 을 리턴 할 수도 있는데 예외처리 없어도 되는지 검토 필요
                 candidate_block.next_leader_peer = peer_manager.get_next_leader_peer().peer_id
 
                 # 생성된 블럭을 투표 요청하기 위해서 broadcast 한다.
@@ -148,7 +155,7 @@ class ConsensusSiever(ConsensusBase):
                     # TODO LEADER_BLOCK_CREATION_LIMIT 에서 무조건 리더가 변경된다. 잔여 tx 처리가 필요하다.
                     self._stop_gen_block()
                     util.logger.spam(f"consensus_siever:consensus channel({self._channel_name}) "
-                                     f"\ntry ObjectManager().peer_service.rotate_next_leader(self._channel_name)")
+                                     f"\ntry ObjectManager().peer_service.rotate_next_leader({self._channel_name})")
                     ObjectManager().peer_service.rotate_next_leader(self._channel_name)
 
         self._makeup_block()

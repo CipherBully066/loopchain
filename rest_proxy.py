@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
-import sys
+import argparse
 import logging
 import multiprocessing
-import getopt
+import sys
+
 import gunicorn.app.base
 from gunicorn.six import iteritems
 
@@ -50,36 +50,35 @@ def usage():
 def main(argv):
     util.logger.spam("RESTful proxy main got argv(list): " + str(argv))
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--port",
+                        help="rest_proxy port")
+    parser.add_argument("-o", "--configure_file_path",
+                        help="json configure file path")
+    parser.add_argument("-d", "--develop", action="store_true",
+                        help="set log level to SPAM (low develop mode)")
+
     try:
-        opts, args = getopt.getopt(argv, "dhp:",
-                                   ["help",
-                                    "port=",
-                                    ])
-    except getopt.GetoptError as e:
-        logging.error(e)
-        usage()
-        sys.exit(1)
+        args = parser.parse_args(argv)
+    except Exception as e:
+        logging.exception(f"rest proxy args exception : {e}")
+        util.exit_and_msg(f"rest proxy args exception : {e}")
+
+    if args.configure_file_path:
+        conf.Configure().load_configure_json(args.configure_file_path)
 
     # Port and host values.
     port = conf.PORT_PEER
     host = '0.0.0.0'
-
-    # Parse command line arguments.
-    for opt, arg in opts:
-        if opt == "-p":
-            port = int(arg)
-        elif opt == "-d":
-            util.set_log_level_debug()
-        elif opt == "-h":
-            usage()
-            return
-
+    if args.develop:
+        util.set_log_level_debug()
+    if args.port:
+        port = int(args.port)
 
     # Connect gRPC stub.
     ServerComponents().set_stub_port(port, conf.IP_LOCAL)
     ServerComponents().set_argument()
     ServerComponents().set_resource()
-
 
     api_port = port + conf.PORT_DIFF_REST_SERVICE_CONTAINER
     logging.debug("Run gunicorn webserver for HA. Port = %s", str(api_port))
