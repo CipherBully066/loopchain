@@ -209,3 +209,4 @@ score/.database_store/
 
 deploy/LOOPCHAIN_VERSION
 parser_py.py
+*.bak
