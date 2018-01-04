@@ -34,6 +34,12 @@ if [[ $# -eq 0 ]] || [ ${ARG} = -help ] ; then
     exit 0
 fi
 
+# Generate code from proto file.
+cd ..
+./generate_code.sh
+cd deploy
+
+
 # loopchain version
 git rev-parse HEAD > LOOPCHAIN_VERSION
 

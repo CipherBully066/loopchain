@@ -22,10 +22,6 @@ COPY channel_manage_data.json ./
 COPY gtool.py ./
 
 
-# Generate code from proto file.
-ADD generate_code.sh ./
-RUN ./generate_code.sh
-
 # Run test code.
 # RUN cd ./loopchain && ./run_test.sh
 
